@@ -84,9 +84,13 @@ AL_TEST(alloc_ipc_encode_is_bounded) {
     AL_REQUIRE(encoded.has_value());
     std::printf("BUDGET ipc_encode allocations=%zu bytes=%zu\n", counter.allocations,
                 counter.bytes);
-    // Measured 2026-10-30: 369 allocations and 141993 bytes for a 63001 byte
-    // payload, which is the body, the message and the joined wire buffer.
+    // The body is written straight into the wire buffer, so the encoder
+    // allocates about one payload plus the messages. Measured 2026-10-30:
+    // 80730 bytes for a 63001 byte payload, down from 141993 when the body had
+    // its own vector. The budget is one payload plus 24 KB of fixed overhead,
+    // which scales with the table instead of pinning a magic number.
     AL_CHECK(counter.allocations <= 400);
+    AL_CHECK(counter.bytes <= encoded->payload.size() + 24000);
 }
 
 AL_TEST(alloc_ipc_view_decode_copies_nothing) {

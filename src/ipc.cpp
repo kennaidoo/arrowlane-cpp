@@ -26,7 +26,7 @@ std::size_t expected_buffers(const Schema& schema) {
     return count;
 }
 
-Result<void> place(std::vector<std::byte>& body, const IpcBuffer& target,
+Result<void> place(std::span<std::byte> body, const IpcBuffer& target,
                    std::span<const std::byte> source) {
     if (source.size() != target.length ||
         target.offset + target.length > body.size()) {
@@ -70,13 +70,17 @@ Result<IpcLayout> plan_ipc_body(const RecordBatch& batch) {
     return layout;
 }
 
-Result<std::vector<std::byte>> build_ipc_body(const RecordBatch& batch,
-                                              const IpcLayout& layout) {
+// Writes every column into the caller buffer at its planned offset. The
+// caller owns the buffer, so the body is written once, in place.
+Result<void> place_ipc_body(const RecordBatch& batch, const IpcLayout& layout,
+                            std::span<std::byte> body) {
     if (layout.buffers.size() != expected_buffers(batch.schema)) {
         return std::unexpected(make_error(Code::Invalid,
                                           "ipc layout has the wrong buffer count"));
     }
-    std::vector<std::byte> body(static_cast<std::size_t>(layout.body_size), std::byte{0});
+    if (body.size() != static_cast<std::size_t>(layout.body_size)) {
+        return std::unexpected(make_error(Code::Invalid, "ipc body size mismatch"));
+    }
     std::size_t buffer = 0;
     for (std::size_t index = 0; index < batch.columns.size(); ++index) {
         const Column& column = batch.columns[index];
@@ -91,6 +95,16 @@ Result<std::vector<std::byte>> build_ipc_body(const RecordBatch& batch,
         auto data = place(body, layout.buffers[buffer++], column.data.bytes());
         if (!data) return std::unexpected(data.error());
     }
+    return {};
+}
+
+// The public helper keeps its owning shape for callers and tests. The encoder
+// does not use it: it calls place_ipc_body directly into the wire buffer.
+Result<std::vector<std::byte>> build_ipc_body(const RecordBatch& batch,
+                                              const IpcLayout& layout) {
+    std::vector<std::byte> body(static_cast<std::size_t>(layout.body_size), std::byte{0});
+    auto placed = place_ipc_body(batch, layout, body);
+    if (!placed) return std::unexpected(placed.error());
     return body;
 }
 
@@ -99,8 +113,6 @@ Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch) {
     if (!schema_message) return std::unexpected(schema_message.error());
     auto layout = plan_ipc_body(batch);
     if (!layout) return std::unexpected(layout.error());
-    auto body = build_ipc_body(batch, *layout);
-    if (!body) return std::unexpected(body.error());
 
     // The writer holds the two flatbuffer messages, a few hundred bytes each.
     detail::FlatWriter writer(4096);
@@ -108,7 +120,7 @@ Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch) {
     writer.add_i16(message, 0, detail::kMessageVersionV5);
     writer.add_u8(message, 1, detail::kMessageHeaderRecordBatch);
     const std::size_t header_field = writer.add_offset(message, 2);
-    writer.add_i64(message, 3, static_cast<std::int64_t>(body->size()));
+    writer.add_i64(message, 3, layout->body_size);
     writer.end_table(message);
 
     auto record = writer.begin_table(3);
@@ -138,11 +150,18 @@ Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch) {
     writer.patch_offset(buffers_field, buffers.pos);
     writer.patch_offset(header_field, record.pos);
 
+    // One allocation for the whole frame. The body is placed into the region
+    // it will occupy in the wire, so nothing is copied twice.
     std::vector<std::byte> out = std::move(*schema_message);
     auto meta = detail::encapsulate(writer.finish(message.pos));
-    out.reserve(out.size() + meta.size() + body->size() + kEndOfStream.size());
+    const auto body_size = static_cast<std::size_t>(layout->body_size);
+    const std::size_t body_start = out.size() + meta.size();
+    out.reserve(body_start + body_size + kEndOfStream.size());
     out.insert(out.end(), meta.begin(), meta.end());
-    out.insert(out.end(), body->begin(), body->end());
+    out.resize(body_start + body_size);
+    auto placed = place_ipc_body(batch, *layout,
+                                 std::span<std::byte>(out.data() + body_start, body_size));
+    if (!placed) return std::unexpected(placed.error());
     out.insert(out.end(), kEndOfStream.begin(), kEndOfStream.end());
     return out;
 }
