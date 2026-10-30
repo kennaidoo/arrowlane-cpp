@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <string_view>
 
 namespace altest {
 
@@ -42,9 +45,27 @@ std::string to_text(double value) {
 
 }  // namespace altest
 
-int main() {
+int main(int argc, char** argv) {
+    const std::string_view filter = argc > 1 ? argv[1] : "";
+#if defined(_MSC_VER)
+    char* verbose_value = nullptr;
+    std::size_t verbose_size = 0;
+    const bool verbose =
+        _dupenv_s(&verbose_value, &verbose_size, "AL_VERBOSE") == 0 &&
+        verbose_value != nullptr;
+    std::free(verbose_value);
+#else
+    const bool verbose = std::getenv("AL_VERBOSE") != nullptr;
+#endif
     int failed_tests = 0;
+    std::size_t ran = 0;
     for (const auto& test : altest::registry()) {
+        if (!filter.empty() &&
+            std::string_view(test.name).find(filter) == std::string_view::npos) {
+            continue;
+        }
+        ++ran;
+        if (verbose) std::fprintf(stderr, "run %s\n", test.name);
         const int before = altest::failures;
         test.fn();
         if (altest::failures != before) {
@@ -53,10 +74,10 @@ int main() {
         }
     }
     if (failed_tests != 0) {
-        std::printf("%d of %zu tests failed, %d checks failed\n", failed_tests,
-                    altest::registry().size(), altest::failures);
+        std::printf("%d of %zu tests failed, %d checks failed\n", failed_tests, ran,
+                    altest::failures);
         return 1;
     }
-    std::printf("ok %zu tests, %d checks\n", altest::registry().size(), altest::checks);
+    std::printf("ok %zu tests, %d checks\n", ran, altest::checks);
     return 0;
 }

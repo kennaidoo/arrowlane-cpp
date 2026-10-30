@@ -133,10 +133,16 @@ AL_TEST(column_typed_views) {
     const auto batch = build_fixture(3);
     const Column& score = batch.columns[2];
     const auto doubles = detail::view_as<double>(score.data.bytes());
+#if defined(__cpp_lib_start_lifetime_as) && __cpp_lib_start_lifetime_as >= 202207L
     AL_REQUIRE(doubles.size() == 3);
     AL_CHECK_EQ(doubles[0], 0.0);
     AL_CHECK(doubles[1] == 1.0 / 3.0);
     AL_CHECK(doubles[2] == 2.0 / 3.0);
+#else
+    // No start_lifetime_as: the documented contract is an empty span and the
+    // caller uses read_at. The portable path below is checked either way.
+    AL_CHECK(doubles.empty());
+#endif
     AL_CHECK_EQ(detail::read_at<double>(score.data.bytes(), 1), 1.0 / 3.0);
     AL_CHECK(detail::view_as<double>(score.data.bytes().subspan(1)).empty());
 }
