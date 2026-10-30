@@ -81,7 +81,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", required=True, type=Path)
     parser.add_argument("--rows", type=int, default=500)
-    parser.add_argument("--lanes", default="json")
+    parser.add_argument("--lanes", default="json,ipc,ipc-zstd")
     args = parser.parse_args()
     if not args.exe.exists():
         raise SystemExit(f"binary not found: {args.exe}")
