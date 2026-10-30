@@ -151,6 +151,7 @@ int unpack_command(const char* path, bool as_json) {
         stream.read(reinterpret_cast<char*>(wire.data()),
                     static_cast<std::streamsize>(size));
     }
+    const std::size_t wire_size = wire.size();
     auto owner = std::make_shared<const std::vector<std::byte>>(std::move(wire));
     const std::span<const std::byte> data(owner->data(), owner->size());
     auto view = arrowlane::decode_frame_view(data);
@@ -178,7 +179,7 @@ int unpack_command(const char* path, bool as_json) {
              arrowlane::JsonValue(static_cast<std::int64_t>(batch->columns.size())));
     root.set("uncompressed_bytes",
              arrowlane::JsonValue(static_cast<std::int64_t>(view->uncompressed_len)));
-    root.set("wire_bytes", arrowlane::JsonValue(static_cast<std::int64_t>(wire.size())));
+    root.set("wire_bytes", arrowlane::JsonValue(static_cast<std::int64_t>(wire_size)));
     arrowlane::JsonValue schema = arrowlane::JsonValue::make_array();
     for (std::size_t index = 0; index < batch->schema.fields.size(); ++index) {
         const auto& field = batch->schema.fields[index];
