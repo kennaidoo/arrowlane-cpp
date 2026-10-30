@@ -424,6 +424,10 @@ Result<RecordBatch> decode_record_batch(
             return std::unexpected(make_error(
                 Code::BadHeader, "node length does not match the batch length"));
         }
+        if (column.length > static_cast<std::int64_t>(kMaxChunkRows)) {
+            return std::unexpected(make_error(
+                Code::BadHeader, "node length exceeds the row cap"));
+        }
         if (type.kind != Type::Kind::Null) {
             const std::uint64_t validity_needed =
                 column.null_count > 0

@@ -263,6 +263,8 @@ std::optional<FlatReader::Vector> FlatReader::vector(const Table& table,
     result.count = count;
     result.data = *position + 4;
     if (result.data > data_.size()) return std::nullopt;
+    // Every element is at least four bytes, so a larger count cannot be real.
+    if (count > (data_.size() - result.data) / 4) return std::nullopt;
     return result;
 }
 
