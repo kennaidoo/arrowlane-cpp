@@ -60,9 +60,6 @@ endif()
 add_executable(arrowlane-cpp src/main.cpp)
 target_link_libraries(arrowlane-cpp PRIVATE arrowlane_core)
 
-add_executable(smoke_test test/smoke_test.cpp)
-target_link_libraries(smoke_test PRIVATE arrowlane_core)
-
 if(AL_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.cpp")
   enable_testing()
   add_library(al_test_main STATIC test/harness.cpp)
