@@ -32,6 +32,7 @@ public:
         std::size_t pos = 0;
         std::size_t data = 0;
         std::size_t count = 0;
+        std::size_t stride = 0;
     };
 
     Table begin_table(std::size_t slots);
@@ -48,6 +49,8 @@ public:
     void set_element(OffsetVector& vector, std::size_t index, std::size_t target);
     StructVector add_struct_vector(std::size_t count, std::size_t struct_size,
                                    std::size_t alignment);
+    void write_struct(StructVector& vector, std::size_t index,
+                      std::span<const std::byte> bytes);
     void patch_offset(std::size_t field, std::size_t target);
     std::vector<std::byte> finish(std::size_t root);
 
@@ -97,5 +100,8 @@ public:
 private:
     std::span<const std::byte> data_;
 };
+
+// Prefixes a finished flatbuffer with the Arrow encapsulation marker and length.
+[[nodiscard]] std::vector<std::byte> encapsulate(std::vector<std::byte> flat);
 
 }  // namespace arrowlane::detail

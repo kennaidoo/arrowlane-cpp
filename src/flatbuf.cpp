@@ -141,11 +141,20 @@ FlatWriter::StructVector FlatWriter::add_struct_vector(std::size_t count,
     StructVector vector;
     vector.pos = buffer_.size();
     vector.count = count;
+    vector.stride = struct_size;
     buffer_.resize(buffer_.size() + 4);
     store_le<std::uint32_t>(buffer_.data() + vector.pos, static_cast<std::uint32_t>(count));
     vector.data = buffer_.size();
     buffer_.resize(buffer_.size() + count * struct_size, std::byte{0});
     return vector;
+}
+
+void FlatWriter::write_struct(StructVector& vector, std::size_t index,
+                              std::span<const std::byte> bytes) {
+    assert(index < vector.count);
+    assert(bytes.size() <= vector.stride);
+    std::memcpy(buffer_.data() + vector.data + index * vector.stride, bytes.data(),
+                bytes.size());
 }
 
 void FlatWriter::patch_offset(std::size_t field_pos, std::size_t target) {
@@ -157,6 +166,17 @@ std::vector<std::byte> FlatWriter::finish(std::size_t root) {
     pad_to(8);
     store_le<std::uint32_t>(buffer_.data(), static_cast<std::uint32_t>(root));
     return std::move(buffer_);
+}
+
+std::vector<std::byte> encapsulate(std::vector<std::byte> flat) {
+    while (flat.size() % 8 != 0) {
+        flat.push_back(std::byte{0});
+    }
+    std::vector<std::byte> out(flat.size() + 8);
+    store_le<std::uint32_t>(out.data(), 0xFFFFFFFFU);
+    store_le<std::uint32_t>(out.data() + 4, static_cast<std::uint32_t>(flat.size()));
+    std::memcpy(out.data() + 8, flat.data(), flat.size());
+    return out;
 }
 
 std::optional<FlatReader::Table> FlatReader::table_at(std::size_t pos) const {
