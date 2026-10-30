@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -86,4 +87,30 @@ AL_TEST(frame_rejects_each_fault) {
     AL_REQUIRE(decoded.has_value());
     AL_CHECK_EQ(decoded->rows, std::uint64_t{3});
     AL_CHECK_EQ(decoded->payload.size(), std::size_t{2});
+}
+
+AL_TEST(frame_stream_roundtrip) {
+    const auto frame = make_test_frame();
+    std::ostringstream out;
+    auto written = arrowlane::write_frame(out, frame);
+    AL_REQUIRE(written.has_value());
+    AL_CHECK_EQ(*written, static_cast<std::uint64_t>(out.str().size()));
+
+    std::istringstream in(out.str());
+    auto read = arrowlane::read_frame(in);
+    AL_REQUIRE(read.has_value());
+    AL_REQUIRE(read->has_value());
+    AL_CHECK_EQ((*read)->rows, std::uint64_t{3});
+
+    auto end = arrowlane::read_frame(in);
+    AL_REQUIRE(end.has_value());
+    AL_CHECK(!end->has_value());
+}
+
+AL_TEST(frame_stream_truncated_payload) {
+    std::ostringstream out;
+    AL_REQUIRE(arrowlane::write_frame(out, make_test_frame()).has_value());
+    const std::string bytes = out.str();
+    std::istringstream in(bytes.substr(0, bytes.size() - 1));
+    AL_CHECK_ERR(arrowlane::read_frame(in), arrowlane::Code::TruncatedFrame);
 }

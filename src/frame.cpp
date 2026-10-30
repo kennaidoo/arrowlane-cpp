@@ -148,9 +148,24 @@ Result<Prefix> read_prefix(std::span<const std::byte> data, std::size_t max_payl
     return prefix;
 }
 
+Result<bool> read_exact(std::istream& stream, std::span<std::byte> out) {
+    if (out.empty()) return true;
+    stream.read(reinterpret_cast<char*>(out.data()),
+                static_cast<std::streamsize>(out.size()));
+    const std::streamsize got = stream.gcount();
+    if (got == 0) return false;
+    if (got < static_cast<std::streamsize>(out.size())) {
+        return std::unexpected(make_error(
+            Code::TruncatedFrame,
+            "stream ended after " + std::to_string(got) + " of " +
+                std::to_string(out.size()) + " bytes"));
+    }
+    return true;
+}
+
 }  // namespace
 
-Result<std::vector<std::byte>> encode_frame(const Frame& frame, std::size_t max_payload) {
+Result<FrameParts> encode_parts(const Frame& frame, std::size_t max_payload) {
     if (max_payload > kMaxPayloadBytes) {
         return std::unexpected(make_error(
             Code::OversizeFrame,
@@ -170,47 +185,64 @@ Result<std::vector<std::byte>> encode_frame(const Frame& frame, std::size_t max_
     if (header.find("producer") == nullptr) {
         header.set("producer", JsonValue(std::string(kProducer)));
     }
-    const std::string header_text = json_write_sorted(header);
-    if (header_text.size() > kMaxHeaderBytes) {
+    FrameParts parts;
+    parts.header = json_write_sorted(header);
+    if (parts.header.size() > kMaxHeaderBytes) {
         return std::unexpected(make_error(
             Code::OversizeFrame,
-            "header " + std::to_string(header_text.size()) + " exceeds " +
+            "header " + std::to_string(parts.header.size()) + " exceeds " +
                 std::to_string(kMaxHeaderBytes)));
     }
     const std::uint32_t checksum = crc32(frame.payload);
-    std::vector<std::byte> out(kPrefixSize + header_text.size() + frame.payload.size());
-    std::byte* prefix = out.data();
+    std::byte* prefix = parts.prefix.data();
     std::memcpy(prefix, "ALN1", 4);
     prefix[4] = static_cast<std::byte>(kFormatVersion);
     prefix[5] = static_cast<std::byte>(frame.lane);
     detail::store_le<std::uint16_t>(prefix + 6, frame.flags);
-    detail::store_le<std::uint64_t>(prefix + 8, static_cast<std::uint64_t>(frame.payload.size()));
+    detail::store_le<std::uint64_t>(prefix + 8,
+                                    static_cast<std::uint64_t>(frame.payload.size()));
     detail::store_le<std::uint64_t>(prefix + 16, frame.uncompressed_len);
     detail::store_le<std::uint64_t>(prefix + 24, frame.rows);
     detail::store_le<std::uint32_t>(prefix + 32, checksum);
     detail::store_le<std::uint16_t>(prefix + 36,
-                                    static_cast<std::uint16_t>(header_text.size()));
-    std::memcpy(out.data() + kPrefixSize, header_text.data(), header_text.size());
-    if (!frame.payload.empty()) {
-        std::memcpy(out.data() + kPrefixSize + header_text.size(), frame.payload.data(),
-                    frame.payload.size());
+                                    static_cast<std::uint16_t>(parts.header.size()));
+    parts.payload = frame.payload;
+    return parts;
+}
+
+Result<std::vector<std::byte>> encode_frame(const Frame& frame, std::size_t max_payload) {
+    auto parts = encode_parts(frame, max_payload);
+    if (!parts) return std::unexpected(parts.error());
+    std::vector<std::byte> out(kPrefixSize + parts->header.size() + parts->payload.size());
+    std::memcpy(out.data(), parts->prefix.data(), kPrefixSize);
+    std::memcpy(out.data() + kPrefixSize, parts->header.data(), parts->header.size());
+    if (!parts->payload.empty()) {
+        std::memcpy(out.data() + kPrefixSize + parts->header.size(), parts->payload.data(),
+                    parts->payload.size());
     }
     return out;
 }
 
-Result<Frame> decode_frame(std::span<const std::byte> data, std::size_t max_payload,
-                           std::size_t max_uncompressed) {
-    auto prefix = read_prefix(data, max_payload, max_uncompressed);
+namespace {
+
+Result<Frame> decode_frame_parts(std::span<const std::byte> prefix_bytes,
+                                 std::span<const std::byte> header_bytes,
+                                 std::span<const std::byte> payload,
+                                 std::size_t max_payload, std::size_t max_uncompressed) {
+    auto prefix = read_prefix(prefix_bytes, max_payload, max_uncompressed);
     if (!prefix) return std::unexpected(prefix.error());
-    const std::size_t body_start = kPrefixSize + prefix->header_len;
-    const std::size_t declared = body_start + static_cast<std::size_t>(prefix->payload_len);
-    if (declared != data.size()) {
+    if (static_cast<std::uint64_t>(header_bytes.size()) != prefix->header_len) {
         return std::unexpected(make_error(
             Code::TruncatedFrame,
-            "frame declares " + std::to_string(declared) + " bytes, carries " +
-                std::to_string(data.size())));
+            "header declares " + std::to_string(prefix->header_len) + " bytes, carries " +
+                std::to_string(header_bytes.size())));
     }
-    const auto header_bytes = data.subspan(kPrefixSize, prefix->header_len);
+    if (static_cast<std::uint64_t>(payload.size()) != prefix->payload_len) {
+        return std::unexpected(make_error(
+            Code::TruncatedFrame,
+            "payload declares " + std::to_string(prefix->payload_len) + " bytes, carries " +
+                std::to_string(payload.size())));
+    }
     auto header = json_parse(std::string_view(
         reinterpret_cast<const char*>(header_bytes.data()), header_bytes.size()));
     if (!header) return std::unexpected(header.error());
@@ -225,7 +257,6 @@ Result<Frame> decode_frame(std::span<const std::byte> data, std::size_t max_payl
                 std::string("chunk metadata is invalid: ") + chunk.error().message));
         }
     }
-    const auto payload = data.subspan(body_start);
     if (crc32(payload) != prefix->crc) {
         return std::unexpected(make_error(Code::ChecksumMismatch,
                                           "payload does not match the frame CRC"));
@@ -238,6 +269,68 @@ Result<Frame> decode_frame(std::span<const std::byte> data, std::size_t max_payl
     frame.flags = prefix->flags;
     frame.header = std::move(*header);
     return frame;
+}
+
+}  // namespace
+
+Result<Frame> decode_frame(std::span<const std::byte> data, std::size_t max_payload,
+                           std::size_t max_uncompressed) {
+    auto prefix = read_prefix(data, max_payload, max_uncompressed);
+    if (!prefix) return std::unexpected(prefix.error());
+    const std::size_t body_start = kPrefixSize + prefix->header_len;
+    const std::size_t declared = body_start + static_cast<std::size_t>(prefix->payload_len);
+    if (declared != data.size()) {
+        return std::unexpected(make_error(
+            Code::TruncatedFrame,
+            "frame declares " + std::to_string(declared) + " bytes, carries " +
+                std::to_string(data.size())));
+    }
+    return decode_frame_parts(data.first(kPrefixSize),
+                              data.subspan(kPrefixSize, prefix->header_len),
+                              data.subspan(body_start), max_payload, max_uncompressed);
+}
+
+Result<std::uint64_t> write_frame(std::ostream& stream, const Frame& frame,
+                                  std::size_t max_payload) {
+    auto parts = encode_parts(frame, max_payload);
+    if (!parts) return std::unexpected(parts.error());
+    stream.write(reinterpret_cast<const char*>(parts->prefix.data()),
+                 static_cast<std::streamsize>(parts->prefix.size()));
+    stream.write(parts->header.data(), static_cast<std::streamsize>(parts->header.size()));
+    if (!parts->payload.empty()) {
+        stream.write(reinterpret_cast<const char*>(parts->payload.data()),
+                     static_cast<std::streamsize>(parts->payload.size()));
+    }
+    if (!stream) {
+        return std::unexpected(make_error(Code::Io, "stream write failed"));
+    }
+    return static_cast<std::uint64_t>(parts->prefix.size() + parts->header.size() +
+                                      parts->payload.size());
+}
+
+Result<std::optional<Frame>> read_frame(std::istream& stream, std::size_t max_payload,
+                                        std::size_t max_uncompressed) {
+    std::array<std::byte, kPrefixSize> prefix{};
+    auto status = read_exact(stream, prefix);
+    if (!status) return std::unexpected(status.error());
+    if (!*status) return std::optional<Frame>{};
+    auto fields = read_prefix(prefix, max_payload, max_uncompressed);
+    if (!fields) return std::unexpected(fields.error());
+    std::vector<std::byte> header(static_cast<std::size_t>(fields->header_len));
+    auto header_status = read_exact(stream, header);
+    if (!header_status) return std::unexpected(header_status.error());
+    if (!*header_status) {
+        return std::unexpected(make_error(Code::TruncatedFrame, "stream ended inside a frame"));
+    }
+    std::vector<std::byte> payload(static_cast<std::size_t>(fields->payload_len));
+    auto payload_status = read_exact(stream, payload);
+    if (!payload_status) return std::unexpected(payload_status.error());
+    if (!*payload_status) {
+        return std::unexpected(make_error(Code::TruncatedFrame, "stream ended inside a frame"));
+    }
+    auto frame = decode_frame_parts(prefix, header, payload, max_payload, max_uncompressed);
+    if (!frame) return std::unexpected(frame.error());
+    return std::optional<Frame>{std::move(*frame)};
 }
 
 }  // namespace arrowlane

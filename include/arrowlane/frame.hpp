@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <istream>
@@ -53,6 +54,22 @@ struct Frame {
 
 [[nodiscard]] Result<Frame> decode_frame(
     std::span<const std::byte> data, std::size_t max_payload = kMaxPayloadBytes,
+    std::size_t max_uncompressed = kMaxUncompressedBytes);
+
+struct FrameParts {
+    std::array<std::byte, kPrefixSize> prefix{};
+    std::string header;
+    std::span<const std::byte> payload;
+};
+
+[[nodiscard]] Result<FrameParts> encode_parts(
+    const Frame& frame, std::size_t max_payload = kMaxPayloadBytes);
+
+[[nodiscard]] Result<std::uint64_t> write_frame(
+    std::ostream& stream, const Frame& frame, std::size_t max_payload = kMaxPayloadBytes);
+
+[[nodiscard]] Result<std::optional<Frame>> read_frame(
+    std::istream& stream, std::size_t max_payload = kMaxPayloadBytes,
     std::size_t max_uncompressed = kMaxUncompressedBytes);
 
 }  // namespace arrowlane
