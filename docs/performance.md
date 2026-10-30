@@ -37,72 +37,75 @@ All four are in process timings, so no container start is included.
 
 | Impl | Wire bytes | Encode ms | Decode ms |
 |---|---|---|---|
-| cpp | 12670881 | 6.996 | 5.935 |
-| python | 12670845 | 18.199 | 3.365 |
-| rust | 12671117 | 1.387 | 2.421 |
-| zig | 12670849 | 40.296 | 24.687 |
+| cpp | 12670881 | 3.449 | 2.640 |
+| python | 12670845 | 21.601 | 3.785 |
+| rust | 12671117 | 2.656 | 3.490 |
+| zig | 12670849 | 46.989 | 26.738 |
 
 ### json lane
 
 | Impl | Wire bytes | Encode ms | Decode ms |
 |---|---|---|---|
-| cpp | 42505784 | 515.954 | 536.766 |
-| python | 42505756 | 1965.868 | 1871.103 |
-| rust | 42505812 | 223.832 | 1051.174 |
-| zig | 42372426 | 169.826 | 313.475 |
+| cpp | 42505784 | 418.034 | 594.791 |
+| python | 42505756 | 2212.442 | 2076.506 |
+| rust | 42505812 | 252.245 | 1182.569 |
+| zig | 42372426 | 195.108 | 352.970 |
 
 ### ipc-zstd lane
 
 | Impl | Wire bytes | Encode ms | Decode ms |
 |---|---|---|---|
-| cpp | 1608747 | 23.853 | 8.417 |
-| python | 1620041 | 25.030 | 18.080 |
-| rust | 1625309 | 24.252 | 9.889 |
-| zig | 1620045 | 54.904 | 19.964 |
+| cpp | 1608747 | 28.455 | 10.144 |
+| python | 1620041 | 31.133 | 26.165 |
+| rust | 1625309 | 30.259 | 11.885 |
+| zig | 1620045 | 65.474 | 22.717 |
 
 The zstd lane is where this implementation is fastest outright: smallest wire
 frame, fastest encode, fastest decode. It is not a scored row in the win table,
-which is why it is not claimed as a win.
+which is why it is not claimed as a win. The ipc decode row is a scored row and
+it is now the fastest of the four.
 
 ## Win conditions
 
 | Condition | C++ | Reference | Limit | Verdict |
 |---|---|---|---|---|
-| ipc encode | 6.996 | rust 1.387 | 1.248 | LOSS |
-| ipc decode | 5.935 | rust 2.421 | 1.937 | LOSS |
-| json encode | 515.954 | python 1965.868 | 2162.455 | WIN |
-| json decode | 536.766 | rust 1051.174 | 630.704 | WIN |
+| ipc encode | 3.449 | rust 2.656 | 2.390 | LOSS |
+| ipc decode | 2.640 | rust 3.490 | 2.792 | WIN |
+| json encode | 418.034 | python 2212.442 | 2433.686 | WIN |
+| json decode | 594.791 | rust 1182.569 | 709.541 | WIN |
 | ipc wire bytes | 12670881 | python 12670845 | 12924262 | WIN |
 
-Three wins, two losses.
+Four wins, one loss. ipc decode now beats Rust outright, and ipc encode is
+1.3 times Rust instead of 5 times.
+
+The reference numbers move between runs because the machine does: Rust's ipc
+encode measured 1.387 ms in the previous run and 2.656 ms in this one. Only
+ratios inside one run mean anything, and only one run at a time.
 
 ## Losses
 
 Every missed target, with the number and the open task behind it.
 
-1. **ipc encode, 6.996 ms against a 1.248 ms limit.** 5.6 times the target and
-   five times Rust. Two causes, both measured:
-   - CRC32 costs 6.279 ms per 12.67 MB pass with the slicing by eight table,
-     which is 45 percent of encode and 61 percent of decode.
-   - The encoder copies the payload twice: once into the IPC body, once into
-     the joined wire buffer.
-   Open task: a carry-less multiply checksum path, and a writer that places the
-   body directly into the output buffer.
-2. **ipc decode, 5.935 ms against a 1.937 ms limit.** 3.1 times the target.
-   Same checksum cost, plus one payload copy on the owning path and a second
-   copy out of the columns. The zero copy view path exists and is tested, but
-   the benchmark measures the owning path because that is what a caller who
-   wants a table gets.
-   Open task: the same checksum work, then measure the view path as its own row.
-3. **Release binary, 1,122,816 bytes against a 512 KB target.** 2.2 times the
+1. **ipc encode, 3.449 ms against a 2.390 ms limit.** 1.44 times the limit and
+   1.3 times Rust. Down from 6.996 ms, after two changes: the checksum path
+   (6.279 ms per pass to about 1 ms) and placing the body directly into the
+   output instead of copying it there.
+   Open task: the last 1 ms is the remaining copy into the wire buffer, which
+   needs a scatter write. That changes the public surface and needs a decision.
+2. **Release binary, 1,122,816 bytes against a 512 KB target.** 2.2 times the
    target. About 700 KB of it is statically linked zstd. A build with
    `-DAL_BUILD_ZSTD=OFF` is smaller and cannot read the zstd lane, so the
    number above is the honest one for the full feature set.
-4. **Startup time, not measured.** The Rust and Zig images are scratch images
+3. **Startup time, not measured.** The Rust and Zig images are scratch images
    with no shell, so `--version` cannot be timed inside them. This row is
    unproven, not won.
-5. **Peak RSS at 500000 rows, not measured for all four.** Same reason. The C++
+4. **Peak RSS at 500000 rows, not measured for all four.** Same reason. The C++
    number is taken from the operating system in `bench --json`.
+5. **json allocations, 163731 for 1000 rows against a target of 5000.** Down
+   from 309673, with byte identical output, but not at the target. The rest is
+   inside the value formatters: a `JsonValue` and a `std::string` per value,
+   with decimal formatting the largest contributor. Open task: formatters that
+   write into a caller buffer.
 
 ## Allocation budgets
 
@@ -111,18 +114,15 @@ pins the measured values.
 
 | Case | Allocations | Bytes |
 |---|---|---|
-| json encode, 1000 rows | 309673 | 12599013 |
-| ipc encode, 1000 rows | 369 | 141993 |
+| json encode, 1000 rows | 163731 | 5362161 |
+| ipc encode, 1000 rows | 366 | 80730 |
 | ipc view decode, 63001 byte payload | 285 | 14856 |
 | ipc owning decode, 63001 byte payload | 291 | 139430 |
 
 Two things to read from that table. The view decode allocates 14,856 bytes for
 a 63,001 byte payload, so it copies no payload, which is the zero copy claim
-proven rather than asserted. And json encode allocates about 310 times per row,
-which breaks the plan's rule that it should allocate none per row, and is the
-measured reason the json lane costs roughly 0.5 ms per thousand rows.
-
-That last one is an open task, not a win.
+proven rather than asserted. And ipc encode allocates one payload plus 18 KB,
+down from 141,993 bytes, because the body is written straight into the wire.
 
 ## Binary size
 
@@ -136,8 +136,9 @@ statically.
 
 ## What is not claimed
 
-Nothing here says this is the fastest implementation. It is fastest on the zstd
-lane, second on json encode and ipc encode, and slower than Rust on both ipc
-conditions. `bench/compare.py --check` exits 1 on those two rows, and that is
-the current state of the work.
+Nothing here says this is the fastest implementation overall. It is fastest on
+ipc decode and on both zstd metrics, second on ipc encode and json decode, and
+third on json encode behind Zig and Rust. `bench/compare.py --check` exits 1 on
+the single remaining loss, ipc encode, and that is the current state of the
+work.
 
