@@ -10,3 +10,4 @@ __pycache__/
 *.ilk
 .vs/
 .venv/
+tools/feature_probe/*.log
