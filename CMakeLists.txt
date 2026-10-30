@@ -13,6 +13,7 @@ if(MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
+include(GNUInstallDirs)
 include(cmake/warnings.cmake)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -41,6 +42,10 @@ list(REMOVE_ITEM AL_CORE_SOURCES
 list(APPEND AL_CORE_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/generated/costmodel_data.cpp")
 
 add_library(arrowlane_core STATIC ${AL_CORE_SOURCES})
+# The C ABI ships as a shared library, and a shared object cannot link a static
+# archive that was compiled without position independent code. MSVC ignores
+# this property; GCC and Clang need it.
+set_target_properties(arrowlane_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(arrowlane_core
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -77,6 +82,16 @@ endif()
 add_executable(arrowlane-cpp src/main.cpp)
 target_link_libraries(arrowlane-cpp PRIVATE arrowlane_core ${AL_PLATFORM_LIBS})
 
+# The C ABI lives in its own shared library, so a foreign binding loads one
+# file and never sees a C++ symbol.
+add_library(arrowlane_capi SHARED src/cabi.cpp)
+target_link_libraries(arrowlane_capi PRIVATE arrowlane_core)
+target_include_directories(arrowlane_capi PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set_target_properties(arrowlane_capi PROPERTIES
+  OUTPUT_NAME arrowlane_capi
+  WINDOWS_EXPORT_ALL_SYMBOLS ON)
+
 if(AL_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.cpp")
   enable_testing()
   add_library(al_test_main STATIC test/harness.cpp)
@@ -87,11 +102,17 @@ if(AL_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.cpp")
   add_test(NAME cli_bench COMMAND arrowlane-cpp bench --rows 100 --repeats 1)
   set_tests_properties(cli_bench PROPERTIES
                        PASS_REGULAR_EXPRESSION "lane +wire_bytes")
+  add_test(NAME cli_manifest COMMAND ${CMAKE_COMMAND}
+    -DBIN=$<TARGET_FILE:arrowlane-cpp>
+    -DMANIFEST=${CMAKE_CURRENT_SOURCE_DIR}/docs/ai/manifest.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_manifest.cmake)
   add_test(NAME cli_describe COMMAND arrowlane-cpp describe)
   set_tests_properties(cli_describe PROPERTIES
                        PASS_REGULAR_EXPRESSION "\"package\":\"arrowlane-cpp\"")
   file(GLOB AL_TEST_SOURCES CONFIGURE_DEPENDS
        "${CMAKE_CURRENT_SOURCE_DIR}/test/*_test.cpp")
+  # cabi_test compiles the ABI source directly, so it does not need the DLL.
+  list(FILTER AL_TEST_SOURCES EXCLUDE REGEX "cabi_test\.cpp$")
   foreach(test_source IN LISTS AL_TEST_SOURCES)
     get_filename_component(test_name "${test_source}" NAME_WE)
     add_executable(${test_name} "${test_source}")
@@ -100,4 +121,17 @@ if(AL_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.cpp")
       AL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures")
     add_test(NAME ${test_name} COMMAND ${test_name})
   endforeach()
+  add_executable(cabi_test test/cabi_test.cpp src/cabi.cpp)
+  target_link_libraries(cabi_test PRIVATE al_test_main)
+  add_test(NAME cabi_test COMMAND cabi_test)
 endif()
+
+install(TARGETS arrowlane-cpp arrowlane_core arrowlane_capi
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/docs/ai/manifest.json"
+        DESTINATION "${CMAKE_INSTALL_DOCDIR}" OPTIONAL)
