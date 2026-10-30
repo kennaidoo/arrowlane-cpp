@@ -60,6 +60,12 @@ void write_string(std::string& out, std::string_view text) {
 void write_number(std::string& out, const JsonValue& value) {
     if (value.is_integer()) {
         char buffer[32];
+        if (value.is_unsigned()) {
+            const auto result =
+                std::to_chars(buffer, buffer + sizeof(buffer), value.as_uint());
+            out.append(buffer, result.ptr);
+            return;
+        }
         const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value.as_int());
         out.append(buffer, result.ptr);
         return;
@@ -372,6 +378,16 @@ JsonValue JsonValue::make_array() {
     JsonValue value;
     value.kind_ = Kind::Array;
     return value;
+}
+
+JsonValue JsonValue::make_uint(std::uint64_t value) {
+    JsonValue result;
+    result.kind_ = Kind::Number;
+    result.integer_ = true;
+    result.unsigned_ = true;
+    result.uint_ = value;
+    result.number_ = static_cast<double>(value);
+    return result;
 }
 
 JsonValue JsonValue::make_object() {

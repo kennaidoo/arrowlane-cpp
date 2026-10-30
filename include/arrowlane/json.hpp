@@ -22,13 +22,16 @@ public:
 
     static JsonValue make_array();
     static JsonValue make_object();
+    static JsonValue make_uint(std::uint64_t value);
 
-    [[nodiscard]] Kind kind() const noexcept { return kind_; }
+    [[nodiscard]]    Kind kind() const noexcept { return kind_; }
     [[nodiscard]] bool is_object() const noexcept { return kind_ == Kind::Object; }
     [[nodiscard]] bool is_null() const noexcept { return kind_ == Kind::Null; }
     [[nodiscard]] bool is_integer() const noexcept { return integer_; }
+    [[nodiscard]] bool is_unsigned() const noexcept { return unsigned_; }
     [[nodiscard]] bool as_bool() const noexcept { return bool_; }
     [[nodiscard]] std::int64_t as_int() const noexcept { return int_; }
+    [[nodiscard]] std::uint64_t as_uint() const noexcept { return uint_; }
     [[nodiscard]] double as_number() const noexcept { return number_; }
     [[nodiscard]] const std::string& as_string() const noexcept { return string_; }
     [[nodiscard]] const std::vector<JsonValue>& items() const noexcept { return items_; }
@@ -44,7 +47,9 @@ private:
     Kind kind_ = Kind::Null;
     bool bool_ = false;
     bool integer_ = false;
+    bool unsigned_ = false;
     std::int64_t int_ = 0;
+    std::uint64_t uint_ = 0;
     double number_ = 0.0;
     std::string string_;
     std::vector<JsonValue> items_;
