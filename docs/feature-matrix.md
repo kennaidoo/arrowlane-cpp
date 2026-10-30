@@ -41,9 +41,43 @@ written by hand.
 
 ## GCC
 
-Pending P0.5. Run the same files in the `rust:1.99.1-bookworm` container and
-record the compiler version, image digest and results here. Do not assume the
-GCC results match MSVC.
+| Item | Value |
+|---|---|
+| Compiler | g++ (Debian 12.2.0-14+deb12u1) 12.2.0 |
+| Image | `rust:1.99.1-bookworm`, `sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b` |
+| Standard | `-std=c++23` |
+| Date | 2026-10-30 |
+| Command | `bash tools/feature_probe/run_docker.sh` |
+
+| Feature | Result |
+|---|---|
+| `<execution>` header | PASS |
+| `std::experimental::observer_ptr` | PASS |
+| `std::experimental::simd` | PASS |
+| `<stdckdint.h>` | FAIL |
+| Contracts `[[pre:]]` | FAIL |
+| `std::copyable_function` | FAIL |
+| `std::function_ref` | FAIL |
+| `std::generator` | FAIL |
+| `<experimental/hazard_pointer>` | FAIL |
+| `<experimental/rcu>` | FAIL |
+| `<experimental/scope>` | FAIL |
+| `std::start_lifetime_as` | FAIL |
+| `std::start_lifetime_as_array` | FAIL |
+| `std::start_lifetime_as_array`, const source | FAIL |
+| `std::submdspan` | FAIL |
+| `std::is_within_lifetime` | FAIL |
+
+Interpretation:
+
+- GCC 12.2 is older than the MSVC 14.51 library. `generator` and
+  `start_lifetime_as` fail because GCC 12 predates the C++23 `<generator>` and
+  the C++26 lifetime facilities. The portable fallbacks stay.
+- `simd` and `observer_ptr` pass on GCC only. They do not enter `src`, because
+  the MSVC probe fails and the AVX2 intrinsic path is already chosen. A future
+  GCC only path needs a macro and its own tests.
+- The product code keeps the MSVC passing set and the portable fallbacks. No
+  source file depends on a GCC only feature.
 
 ## Rules
 
