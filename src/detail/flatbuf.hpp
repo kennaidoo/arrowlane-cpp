@@ -6,6 +6,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace arrowlane::detail {
@@ -16,9 +17,9 @@ public:
 
     struct Table {
         std::size_t pos = 0;
-        std::size_t vtable = 0;
         std::size_t slots = 0;
         std::size_t end = 0;
+        std::vector<std::uint16_t> entries;
     };
 
     struct OffsetVector {
@@ -54,8 +55,12 @@ private:
     void pad_to(std::size_t alignment);
     void add_scalar(Table& table, std::size_t slot, const void* data, std::size_t size,
                     std::size_t alignment);
+    // Returns the position of a vtable with these exact bytes, appending it
+    // when no earlier table shares the shape and size.
+    std::size_t record_vtable(std::span<const std::byte> bytes);
 
     std::vector<std::byte> buffer_;
+    std::unordered_map<std::string, std::size_t> vtables_;
 };
 
 class FlatReader {

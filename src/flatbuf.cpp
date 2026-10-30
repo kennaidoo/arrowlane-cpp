@@ -21,12 +21,10 @@ void FlatWriter::pad_to(std::size_t alignment) {
 FlatWriter::Table FlatWriter::begin_table(std::size_t slots) {
     Table table;
     table.slots = slots;
-    pad_to(2);
-    table.vtable = buffer_.size();
-    buffer_.resize(buffer_.size() + 4 + 2 * slots, std::byte{0});
-    pad_to(8);
+    table.entries.assign(slots, 0);
+    pad_to(4);
     table.pos = buffer_.size();
-    buffer_.resize(buffer_.size() + 4, std::byte{0});
+    buffer_.resize(table.pos + 4, std::byte{0});
     table.end = buffer_.size();
     return table;
 }
@@ -38,8 +36,7 @@ void FlatWriter::add_scalar(Table& table, std::size_t slot, const void* data,
     const std::size_t field_pos = buffer_.size();
     buffer_.resize(buffer_.size() + size);
     std::memcpy(buffer_.data() + field_pos, data, size);
-    store_le<std::uint16_t>(buffer_.data() + table.vtable + 4 + 2 * slot,
-                            static_cast<std::uint16_t>(field_pos - table.pos));
+    table.entries[slot] = static_cast<std::uint16_t>(field_pos - table.pos);
     table.end = buffer_.size();
 }
 
@@ -69,19 +66,40 @@ std::size_t FlatWriter::add_offset(Table& table, std::size_t slot) {
     pad_to(4);
     const std::size_t field_pos = buffer_.size();
     buffer_.resize(buffer_.size() + 4);
-    store_le<std::uint16_t>(buffer_.data() + table.vtable + 4 + 2 * slot,
-                            static_cast<std::uint16_t>(field_pos - table.pos));
+    table.entries[slot] = static_cast<std::uint16_t>(field_pos - table.pos);
     table.end = buffer_.size();
     return field_pos;
 }
 
+std::size_t FlatWriter::record_vtable(std::span<const std::byte> bytes) {
+    const std::string key(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    const auto found = vtables_.find(key);
+    if (found != vtables_.end()) {
+        return found->second;
+    }
+    pad_to(2);
+    const std::size_t position = buffer_.size();
+    buffer_.insert(buffer_.end(), bytes.begin(), bytes.end());
+    vtables_.emplace(key, position);
+    return position;
+}
+
 void FlatWriter::end_table(Table& table) {
-    store_le<std::uint16_t>(buffer_.data() + table.vtable,
-                            static_cast<std::uint16_t>(4 + 2 * table.slots));
-    store_le<std::uint16_t>(buffer_.data() + table.vtable + 2,
-                            static_cast<std::uint16_t>(table.end - table.pos));
-    store_le<std::int32_t>(buffer_.data() + table.pos,
-                           static_cast<std::int32_t>(table.pos - table.vtable));
+    const std::size_t table_size = table.end - table.pos;
+    assert(table_size <= 0xFFFF);
+    std::vector<std::byte> vtable(4 + 2 * table.slots, std::byte{0});
+    store_le<std::uint16_t>(vtable.data(), static_cast<std::uint16_t>(vtable.size()));
+    store_le<std::uint16_t>(vtable.data() + 2, static_cast<std::uint16_t>(table_size));
+    for (std::size_t slot = 0; slot < table.slots; ++slot) {
+        store_le<std::uint16_t>(vtable.data() + 4 + 2 * slot, table.entries[slot]);
+    }
+    // The vtable may sit after the table, which makes the soffset negative.
+    // The format allows this: a reader computes vtable = table - soffset.
+    const std::size_t vtable_pos = record_vtable(vtable);
+    store_le<std::int32_t>(
+        buffer_.data() + table.pos,
+        static_cast<std::int32_t>(static_cast<std::int64_t>(table.pos) -
+                                  static_cast<std::int64_t>(vtable_pos)));
 }
 
 std::size_t FlatWriter::add_string(std::string_view text) {

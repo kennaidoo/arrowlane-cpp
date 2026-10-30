@@ -39,3 +39,23 @@ AL_TEST(flatbuffer_reader_rejects_bad_offsets) {
     arrowlane::detail::FlatReader reader(data);
     AL_CHECK(!reader.root().has_value());
 }
+
+AL_TEST(flatbuffer_shares_identical_vtables) {
+    arrowlane::detail::FlatWriter writer;
+    auto first = writer.begin_table(1);
+    writer.add_i32(first, 0, 7);
+    writer.end_table(first);
+    auto second = writer.begin_table(1);
+    writer.add_i32(second, 0, 9);
+    writer.end_table(second);
+    const auto bytes = writer.finish(first.pos);
+
+    arrowlane::detail::FlatReader reader(bytes);
+    const auto left = reader.table_at(first.pos);
+    const auto right = reader.table_at(second.pos);
+    AL_REQUIRE(left.has_value());
+    AL_REQUIRE(right.has_value());
+    AL_CHECK_EQ(left->vtable, right->vtable);
+    AL_CHECK_EQ(reader.i32(*left, 0).value_or(0), 7);
+    AL_CHECK_EQ(reader.i32(*right, 0).value_or(0), 9);
+}
