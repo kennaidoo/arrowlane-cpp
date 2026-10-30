@@ -6,6 +6,17 @@ set -eu
 BUILD=/tmp/build
 VENDOR=/tmp/vendor
 
+# AddressSanitizer intermittently dies at startup in containers when the kernel
+# randomises the address space with high entropy (AddressSanitizer:DEADLYSIGNAL
+# loop). Disable ASLR for the test processes only. Needs seccomp unconfined.
+run_quiet_aslr() {
+    if command -v setarch >/dev/null 2>&1 && setarch -R true 2>/dev/null; then
+        setarch -R "$@"
+    else
+        "$@"
+    fi
+}
+
 if [ ! -d "$VENDOR/zstd/lib" ]; then
     if [ -d /src/vendor/zstd/lib ]; then
         cp -a /src/vendor "$VENDOR"
@@ -29,19 +40,19 @@ cmake -S /src -B "$BUILD" -G Ninja \
 
 cmake --build "$BUILD"
 
-ctest --test-dir "$BUILD" --output-on-failure
+run_quiet_aslr ctest --test-dir "$BUILD" --output-on-failure
 
 echo "== fuzz_test =="
-"$BUILD/fuzz_test"
+run_quiet_aslr "$BUILD/fuzz_test"
 
 echo "== check_wire =="
-PYTHONPATH=/arrowlane/src python3 /src/interop/check_wire.py \
+PYTHONPATH=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_wire.py \
     --exe "$BUILD/arrowlane-cpp" \
     --rows "${ROWS:-200}" \
     --lanes json,ipc,ipc-zstd
 
 if [ -f /src/interop/fuzz_wire.py ]; then
     echo "== fuzz_wire =="
-    PYTHONPATH=/arrowlane/src python3 /src/interop/fuzz_wire.py \
+    PYTHONPATH=/arrowlane/src "${PYTHON:-python3}" /src/interop/fuzz_wire.py \
         --exe "$BUILD/arrowlane-cpp" --cases "${CASES:-50}"
 fi
