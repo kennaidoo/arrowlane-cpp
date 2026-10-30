@@ -10,6 +10,7 @@
 
 #include "arrowlane/digest.hpp"
 #include "arrowlane/fixture.hpp"
+#include "arrowlane/ipc.hpp"
 #include "arrowlane/lanes.hpp"
 #include "arrowlane/schema.hpp"
 #include "arrowlane/version.hpp"
@@ -102,7 +103,7 @@ int usage() {
                  "\n"
                  "usage:\n"
                  "  arrowlane-cpp --version\n"
-                 "  arrowlane-cpp pack --lane L --rows N --out FILE\n"
+                 "  arrowlane-cpp pack --lane L [--rows N | --in FILE] --out FILE\n"
                  "  arrowlane-cpp unpack FILE [--json]\n"
                  "  arrowlane-cpp debug-schema one|fixture|types\n"
                  "  arrowlane-cpp debug-schema read FILE\n",
@@ -116,13 +117,40 @@ int fail(const arrowlane::Error& error) {
     return 1;
 }
 
-int pack_command(const char* lane_text, std::int64_t rows, const char* out_path) {
+std::vector<std::byte> read_file(const char* path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) return {};
+    stream.seekg(0, std::ios::end);
+    const auto size = static_cast<std::size_t>(stream.tellg());
+    stream.seekg(0, std::ios::beg);
+    std::vector<std::byte> bytes(size);
+    if (size > 0) {
+        stream.read(reinterpret_cast<char*>(bytes.data()),
+                    static_cast<std::streamsize>(size));
+    }
+    return bytes;
+}
+
+int pack_command(const char* lane_text, std::int64_t rows, const char* out_path,
+                 const char* in_path) {
     const auto lane = arrowlane::lane_id_from_name(lane_text);
     if (!lane) {
         std::fprintf(stderr, "error: UnknownLane: no lane named %s\n", lane_text);
         return 1;
     }
-    const auto batch = arrowlane::make_fixture(rows);
+    arrowlane::RecordBatch batch;
+    if (in_path != nullptr) {
+        const auto stream = read_file(in_path);
+        if (stream.empty()) {
+            std::fprintf(stderr, "error: IoError: cannot read %s\n", in_path);
+            return 1;
+        }
+        auto decoded = arrowlane::decode_ipc(stream);
+        if (!decoded) return fail(decoded.error());
+        batch = std::move(*decoded);
+    } else {
+        batch = arrowlane::make_fixture(rows);
+    }
     auto frame = arrowlane::encode_lane(*lane, batch);
     if (!frame) return fail(frame.error());
     auto wire = arrowlane::encode_frame(*frame);
@@ -206,16 +234,18 @@ int main(int argc, char** argv) {
     if (argc >= 2 && std::strcmp(argv[1], "pack") == 0) {
         const char* lane = nullptr;
         const char* out_path = nullptr;
+        const char* in_path = nullptr;
         std::int64_t rows = 3;
         for (int index = 2; index + 1 < argc; index += 2) {
             const std::string_view flag = argv[index];
             if (flag == "--lane") lane = argv[index + 1];
             else if (flag == "--rows") rows = std::strtoll(argv[index + 1], nullptr, 10);
             else if (flag == "--out") out_path = argv[index + 1];
+            else if (flag == "--in") in_path = argv[index + 1];
             else return usage();
         }
         if (!lane || !out_path) return usage();
-        return pack_command(lane, rows, out_path);
+        return pack_command(lane, rows, out_path, in_path);
     }
     if (argc >= 3 && std::strcmp(argv[1], "unpack") == 0) {
         bool as_json = false;
