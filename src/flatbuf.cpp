@@ -102,6 +102,7 @@ FlatWriter::OffsetVector FlatWriter::add_offset_vector(std::size_t count) {
     vector.pos = buffer_.size();
     vector.count = count;
     buffer_.resize(buffer_.size() + 4 + 4 * count, std::byte{0});
+    store_le<std::uint32_t>(buffer_.data() + vector.pos, static_cast<std::uint32_t>(count));
     vector.data = vector.pos + 4;
     return vector;
 }
