@@ -63,3 +63,17 @@ ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_select.py \
 
 echo "== check_chunks =="
 ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_chunks.py     --exe "$BUILD/arrowlane-cpp"
+
+echo "== check_cabi =="
+# The library is built with ASan, so a plain Python process cannot dlopen it.
+# Preload the runtime; leak detection stays off because Python is not
+# instrumented.
+ASAN_RUNTIME="$("${CC:-gcc}" -print-file-name=libasan.so 2>/dev/null || true)"
+if [ -n "$ASAN_RUNTIME" ] && [ "$ASAN_RUNTIME" != "libasan.so" ]; then
+    LD_PRELOAD="$ASAN_RUNTIME" ASAN_OPTIONS=detect_leaks=0     ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_cabi.py         --dll "$BUILD/libarrowlane_capi.so"
+else
+    ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_cabi.py         --dll "$BUILD/libarrowlane_capi.so"
+fi
+
+echo "== check_schema =="
+ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_schema.py     --exe "$BUILD/arrowlane-cpp"
