@@ -69,25 +69,23 @@ std::int64_t days_from_civil(int year, unsigned month, unsigned day) {
 
 std::string date_text(std::int64_t days) {
     const Civil civil = civil_from_days(days);
-    char buffer[16];
+    char buffer[48];
     std::snprintf(buffer, sizeof(buffer), "%04d-%02u-%02u", civil.year, civil.month,
                   civil.day);
     return buffer;
 }
 
 std::string time_text(std::int64_t seconds, std::int64_t micros) {
-    const std::int64_t hour = seconds / 3600;
-    const std::int64_t minute = (seconds / 60) % 60;
-    const std::int64_t second = seconds % 60;
-    char buffer[32];
-    if (micros == 0) {
-        std::snprintf(buffer, sizeof(buffer), "%02lld:%02lld:%02lld",
-                      static_cast<long long>(hour), static_cast<long long>(minute),
-                      static_cast<long long>(second));
+    const int hour = static_cast<int>(seconds / 3600);
+    const int minute = static_cast<int>((seconds / 60) % 60);
+    const int second = static_cast<int>(seconds % 60);
+    const int fraction = static_cast<int>(micros);
+    char buffer[64];
+    if (fraction == 0) {
+        std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d", hour, minute, second);
     } else {
-        std::snprintf(buffer, sizeof(buffer), "%02lld:%02lld:%02lld.%06lld",
-                      static_cast<long long>(hour), static_cast<long long>(minute),
-                      static_cast<long long>(second), static_cast<long long>(micros));
+        std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d.%06d", hour, minute, second,
+                      fraction);
     }
     return buffer;
 }
