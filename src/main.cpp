@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -5,6 +6,7 @@
 #include <fstream>
 #include <memory>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -12,6 +14,7 @@
 #include "arrowlane/costmodel.hpp"
 #include "arrowlane/digest.hpp"
 #include "arrowlane/fixture.hpp"
+#include "arrowlane/frame.hpp"
 #include "arrowlane/ipc.hpp"
 #include "arrowlane/lanes.hpp"
 #include "arrowlane/schema.hpp"
@@ -21,6 +24,8 @@
 #if defined(_WIN32)
 #include <fcntl.h>
 #include <io.h>
+#include <windows.h>
+#include <psapi.h>
 #endif
 
 namespace {
@@ -109,6 +114,8 @@ int usage() {
                  "  arrowlane-cpp select --rows N --bytes N [--topology T] [--policy P]\n"
                  "                          [--allow a,b] [--shm-ready] [--model FILE]\n"
                  "                          [--json]\n"
+                 "  arrowlane-cpp describe [--compact]\n"
+                 "  arrowlane-cpp bench [--rows N] [--repeats N] [--json]\n"
                  "  arrowlane-cpp pack --lane L [--rows N | --in FILE] --out FILE\n"
                  "  arrowlane-cpp unpack FILE [--json]\n"
                  "  arrowlane-cpp debug-schema one|fixture|types\n"
@@ -310,6 +317,155 @@ int unpack_command(const char* path, bool as_json) {
     return 0;
 }
 
+std::int64_t peak_rss_kb() {
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(),
+                             reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+                             sizeof(counters)) != 0) {
+        return static_cast<std::int64_t>(counters.PeakWorkingSetSize / 1024);
+    }
+    return 0;
+#else
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+        if (line.rfind("VmHWM:", 0) != 0) continue;
+        std::istringstream text(line.substr(6));
+        std::int64_t kilobytes = 0;
+        text >> kilobytes;
+        return kilobytes;
+    }
+    return 0;
+#endif
+}
+
+std::string_view lane_media_type(arrowlane::LaneId lane) {
+    switch (lane) {
+        case arrowlane::LaneId::Json: return "application/x-ndjson";
+        case arrowlane::LaneId::Ipc: return "application/vnd.apache.arrow.stream";
+        case arrowlane::LaneId::IpcZstd: return "application/vnd.arrowlane.zstd";
+        case arrowlane::LaneId::Shm: return "application/vnd.arrowlane.shm";
+    }
+    return "";
+}
+
+int describe_command() {
+    // The manifest states what this build can do. `chunked` stays false until
+    // the chunk stream lands in Phase 7, so a caller is never told a lie.
+    arrowlane::JsonValue root = arrowlane::JsonValue::make_object();
+    root.set("schema_version", arrowlane::JsonValue(std::int64_t{1}));
+    root.set("package", arrowlane::JsonValue(std::string("arrowlane-cpp")));
+    root.set("package_version", arrowlane::JsonValue(std::string(arrowlane::kVersion)));
+#if defined(AL_BUILD_TYPE)
+    root.set("build_type", arrowlane::JsonValue(std::string(AL_BUILD_TYPE)));
+#else
+    root.set("build_type", arrowlane::JsonValue(std::string("unknown")));
+#endif
+    arrowlane::JsonValue lanes = arrowlane::JsonValue::make_array();
+    for (std::string_view name : arrowlane::lane_names()) {
+        const auto id = arrowlane::lane_id_from_name(name);
+        bool available = false;
+        for (std::string_view candidate : arrowlane::available_lanes()) {
+            if (candidate == name) available = true;
+        }
+        arrowlane::JsonValue entry = arrowlane::JsonValue::make_object();
+        entry.set("name", arrowlane::JsonValue(std::string(name)));
+        entry.set("id", arrowlane::JsonValue(
+                            static_cast<std::int64_t>(id ? *id : arrowlane::LaneId::Json)));
+        entry.set("media_type",
+                  arrowlane::JsonValue(std::string(lane_media_type(
+                      id.value_or(arrowlane::LaneId::Json)))));
+        entry.set("available", arrowlane::JsonValue(available));
+        lanes.push(std::move(entry));
+    }
+    root.set("lanes", std::move(lanes));
+    arrowlane::JsonValue limits = arrowlane::JsonValue::make_object();
+    limits.set("max_header_bytes",
+               arrowlane::JsonValue(static_cast<std::int64_t>(
+                   arrowlane::kMaxHeaderBytes)));
+    limits.set("max_payload_bytes",
+               arrowlane::JsonValue(static_cast<std::int64_t>(
+                   arrowlane::kMaxPayloadBytes)));
+    limits.set("max_uncompressed_bytes",
+               arrowlane::JsonValue(static_cast<std::int64_t>(
+                   arrowlane::kMaxUncompressedBytes)));
+    limits.set("max_chunk_rows",
+               arrowlane::JsonValue(static_cast<std::int64_t>(
+                   arrowlane::kMaxChunkRows)));
+    limits.set("max_chunks", arrowlane::JsonValue(static_cast<std::int64_t>(
+                                 arrowlane::kMaxChunks)));
+    root.set("limits", std::move(limits));
+    arrowlane::JsonValue streaming = arrowlane::JsonValue::make_object();
+    streaming.set("chunked", arrowlane::JsonValue(false));
+    root.set("streaming", std::move(streaming));
+    std::printf("%s\n", arrowlane::json_write(root).c_str());
+    return 0;
+}
+
+double elapsed_ms(std::chrono::steady_clock::time_point from,
+                  std::chrono::steady_clock::time_point to) {
+    return std::chrono::duration<double, std::milli>(to - from).count();
+}
+
+int bench_command(std::int64_t rows, int repeats, bool as_json) {
+    if (rows < 0 || repeats < 1) {
+        std::fprintf(stderr, "error: InvalidArgument: rows must be >= 0 and repeats >= 1\n");
+        return 2;
+    }
+    const auto batch = arrowlane::make_fixture(rows);
+    if (!as_json) {
+        std::printf("rows=%lld repeats=%d\n", static_cast<long long>(rows), repeats);
+        std::printf("%-10s %12s %12s %12s\n", "lane", "wire_bytes", "enc_ms", "dec_ms");
+    }
+    std::int64_t sink = 0;
+    for (std::string_view name : arrowlane::available_lanes()) {
+        const auto id = arrowlane::lane_id_from_name(name);
+        if (!id) continue;
+        auto frame = arrowlane::encode_lane(*id, batch);
+        if (!frame) return fail(frame.error());
+        auto wire = arrowlane::encode_frame(*frame);
+        if (!wire) return fail(wire.error());
+        const auto wire_bytes = static_cast<std::int64_t>(wire->size());
+        double encode_ms = 0.0;
+        double decode_ms = 0.0;
+        for (int repeat = 0; repeat < repeats; ++repeat) {
+            const auto start = std::chrono::steady_clock::now();
+            auto encoded = arrowlane::encode_lane(*id, batch);
+            if (!encoded) return fail(encoded.error());
+            auto bytes = arrowlane::encode_frame(*encoded);
+            if (!bytes) return fail(bytes.error());
+            const auto encoded_at = std::chrono::steady_clock::now();
+            auto decoded_frame = arrowlane::decode_frame(
+                std::span<const std::byte>(bytes->data(), bytes->size()));
+            if (!decoded_frame) return fail(decoded_frame.error());
+            auto decoded = arrowlane::decode_lane(*decoded_frame);
+            if (!decoded) return fail(decoded.error());
+            const auto decoded_at = std::chrono::steady_clock::now();
+            sink += decoded->rows();
+            encode_ms += elapsed_ms(start, encoded_at);
+            decode_ms += elapsed_ms(encoded_at, decoded_at);
+        }
+        encode_ms /= static_cast<double>(repeats);
+        decode_ms /= static_cast<double>(repeats);
+        if (as_json) {
+            arrowlane::JsonValue entry = arrowlane::JsonValue::make_object();
+            entry.set("lane", arrowlane::JsonValue(std::string(name)));
+            entry.set("wire_bytes", arrowlane::JsonValue(wire_bytes));
+            entry.set("enc_ms", arrowlane::JsonValue(round4(encode_ms)));
+            entry.set("dec_ms", arrowlane::JsonValue(round4(decode_ms)));
+            entry.set("peak_rss_kb", arrowlane::JsonValue(peak_rss_kb()));
+            std::printf("%s\n", arrowlane::json_write(entry).c_str());
+            continue;
+        }
+        std::printf("%-10s %12lld %12.3f %12.3f\n",
+                    std::string(name).c_str(), static_cast<long long>(wire_bytes),
+                    encode_ms, decode_ms);
+    }
+    if (sink < 0) std::fprintf(stderr, "unreachable %lld\n", static_cast<long long>(sink));
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -362,6 +518,29 @@ int main(int argc, char** argv) {
         if (!have_rows || !have_bytes) return usage();
         return select_command(rows, bytes, topology, policy, allow, shm_ready, model,
                               as_json);
+    }
+    if (argc >= 2 && std::strcmp(argv[1], "describe") == 0) {
+        if (argc == 3 && std::strcmp(argv[2], "--compact") != 0) return usage();
+        if (argc > 3) return usage();
+        return describe_command();
+    }
+    if (argc >= 2 && std::strcmp(argv[1], "bench") == 0) {
+        std::int64_t rows = 2000;
+        int repeats = 3;
+        bool as_json = false;
+        for (int index = 2; index < argc; ++index) {
+            const std::string_view flag = argv[index];
+            if (flag == "--json") {
+                as_json = true;
+                continue;
+            }
+            if (index + 1 >= argc) return usage();
+            const char* text = argv[++index];
+            if (flag == "--rows") rows = std::strtoll(text, nullptr, 10);
+            else if (flag == "--repeats") repeats = static_cast<int>(std::strtol(text, nullptr, 10));
+            else return usage();
+        }
+        return bench_command(rows, repeats, as_json);
     }
     if (argc >= 2 && std::strcmp(argv[1], "pack") == 0) {
         const char* lane = nullptr;

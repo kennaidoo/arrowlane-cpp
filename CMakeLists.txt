@@ -15,6 +15,14 @@ endif()
 
 include(cmake/warnings.cmake)
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+endif()
+set(AL_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
+if(NOT AL_BUILD_TYPE)
+  set(AL_BUILD_TYPE "unknown")
+endif()
+
 if(AL_SANITIZE AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
@@ -37,6 +45,8 @@ target_include_directories(arrowlane_core
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(arrowlane_core PUBLIC cxx_std_23)
+target_compile_definitions(arrowlane_core PUBLIC AL_BUILD_TYPE="${AL_BUILD_TYPE}")
+
 target_link_libraries(arrowlane_core PUBLIC al_warnings)
 
 if(AL_BUILD_ZSTD AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/zstd/lib/zstd.h")
@@ -57,8 +67,15 @@ if(AL_BUILD_ZSTD)
   target_link_libraries(arrowlane_core PRIVATE libzstd_static)
 endif()
 
+if(WIN32)
+  # GetProcessMemoryInfo, used by the bench command.
+  set(AL_PLATFORM_LIBS psapi)
+else()
+  set(AL_PLATFORM_LIBS "")
+endif()
+
 add_executable(arrowlane-cpp src/main.cpp)
-target_link_libraries(arrowlane-cpp PRIVATE arrowlane_core)
+target_link_libraries(arrowlane-cpp PRIVATE arrowlane_core ${AL_PLATFORM_LIBS})
 
 if(AL_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.cpp")
   enable_testing()
@@ -67,6 +84,12 @@ if(AL_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.cpp")
     "${CMAKE_CURRENT_SOURCE_DIR}/test"
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
   target_link_libraries(al_test_main PUBLIC arrowlane_core)
+  add_test(NAME cli_bench COMMAND arrowlane-cpp bench --rows 100 --repeats 1)
+  set_tests_properties(cli_bench PROPERTIES
+                       PASS_REGULAR_EXPRESSION "lane +wire_bytes")
+  add_test(NAME cli_describe COMMAND arrowlane-cpp describe)
+  set_tests_properties(cli_describe PROPERTIES
+                       PASS_REGULAR_EXPRESSION "\"package\":\"arrowlane-cpp\"")
   file(GLOB AL_TEST_SOURCES CONFIGURE_DEPENDS
        "${CMAKE_CURRENT_SOURCE_DIR}/test/*_test.cpp")
   foreach(test_source IN LISTS AL_TEST_SOURCES)
