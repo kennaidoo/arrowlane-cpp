@@ -60,3 +60,6 @@ fi
 echo "== check_select =="
 ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_select.py \
     --exe "$BUILD/arrowlane-cpp"
+
+echo "== check_chunks =="
+ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_chunks.py     --exe "$BUILD/arrowlane-cpp"
