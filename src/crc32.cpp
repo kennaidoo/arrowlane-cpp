@@ -27,7 +27,7 @@ constexpr auto kTables = make_tables();
 
 }  // namespace
 
-std::uint32_t crc32(std::span<const std::byte> bytes) noexcept {
+std::uint32_t crc32_table(std::span<const std::byte> bytes) noexcept {
     std::uint32_t crc = 0xFFFFFFFFU;
     const auto* data = reinterpret_cast<const std::uint8_t*>(bytes.data());
     std::size_t index = 0;
@@ -46,6 +46,12 @@ std::uint32_t crc32(std::span<const std::byte> bytes) noexcept {
         crc = kTables[0][(crc ^ data[index]) & 0xFFU] ^ (crc >> 8);
     }
     return crc ^ 0xFFFFFFFFU;
+}
+
+std::uint32_t crc32(std::span<const std::byte> bytes) noexcept {
+    static const bool hardware = crc32_have_pclmul();
+    if (hardware && bytes.size() >= 16) return crc32_pclmul(bytes);
+    return crc32_table(bytes);
 }
 
 }  // namespace arrowlane
