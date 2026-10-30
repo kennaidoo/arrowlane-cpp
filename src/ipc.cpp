@@ -102,7 +102,8 @@ Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch) {
     auto body = build_ipc_body(batch, *layout);
     if (!body) return std::unexpected(body.error());
 
-    detail::FlatWriter writer(1024 + body->size());
+    // The writer holds the two flatbuffer messages, a few hundred bytes each.
+    detail::FlatWriter writer(4096);
     auto message = writer.begin_table(4);
     writer.add_i16(message, 0, detail::kMessageVersionV5);
     writer.add_u8(message, 1, detail::kMessageHeaderRecordBatch);
@@ -139,6 +140,7 @@ Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch) {
 
     std::vector<std::byte> out = std::move(*schema_message);
     auto meta = detail::encapsulate(writer.finish(message.pos));
+    out.reserve(out.size() + meta.size() + body->size() + kEndOfStream.size());
     out.insert(out.end(), meta.begin(), meta.end());
     out.insert(out.end(), body->begin(), body->end());
     out.insert(out.end(), kEndOfStream.begin(), kEndOfStream.end());
