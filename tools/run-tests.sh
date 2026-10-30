@@ -46,13 +46,17 @@ echo "== fuzz_test =="
 run_quiet_aslr "$BUILD/fuzz_test"
 
 echo "== check_wire =="
-PYTHONPATH=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_wire.py \
+ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_wire.py \
     --exe "$BUILD/arrowlane-cpp" \
     --rows "${ROWS:-200}" \
     --lanes json,ipc,ipc-zstd
 
 if [ -f /src/interop/fuzz_wire.py ]; then
     echo "== fuzz_wire =="
-    PYTHONPATH=/arrowlane/src "${PYTHON:-python3}" /src/interop/fuzz_wire.py \
+    ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/fuzz_wire.py \
         --exe "$BUILD/arrowlane-cpp" --cases "${CASES:-50}"
 fi
+
+echo "== check_select =="
+ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_select.py \
+    --exe "$BUILD/arrowlane-cpp"

@@ -25,8 +25,18 @@ RUN $PYTHON -m pip install --no-cache-dir --break-system-packages \
         orjson==3.13.0 \
         tzdata==2025.2
 
-COPY tools/run-tests.sh /usr/local/bin/run-tests.sh
-RUN chmod +x /usr/local/bin/run-tests.sh
+# The runner lives in the repository and is mounted read-only at /src, so the
+# image carries only a launcher. A baked copy would drift from the source and
+# silently run an old suite.
+RUN printf '%s\n' \
+        '#!/bin/sh' \
+        'if [ ! -f /src/tools/run-tests.sh ]; then' \
+        '    echo "error: mount the repository at /src" >&2' \
+        '    exit 2' \
+        'fi' \
+        'exec /bin/sh /src/tools/run-tests.sh "$@"' \
+        > /usr/local/bin/run-tests.sh \
+    && chmod +x /usr/local/bin/run-tests.sh
 
 WORKDIR /src
 ENTRYPOINT ["/usr/local/bin/run-tests.sh"]

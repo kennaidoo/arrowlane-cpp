@@ -2,3 +2,6 @@
 *.cmd text eol=crlf
 *.bat text eol=crlf
 *.png binary
+
+# Shell scripts must keep LF: the container executes the working tree.
+*.sh text eol=lf
