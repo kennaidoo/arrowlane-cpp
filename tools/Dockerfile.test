@@ -13,6 +13,7 @@ RUN apk add --no-cache \
         python-3.15 \
         py3.15-pip \
         util-linux \
+        tzdata \
         curl \
         ca-certificates
 
@@ -21,7 +22,8 @@ RUN apk add --no-cache \
 ENV PYTHON=python3.15
 RUN $PYTHON -m pip install --no-cache-dir --break-system-packages \
         pyarrow==26.0.0 \
-        orjson==3.13.0
+        orjson==3.13.0 \
+        tzdata==2025.2
 
 COPY tools/run-tests.sh /usr/local/bin/run-tests.sh
 RUN chmod +x /usr/local/bin/run-tests.sh
