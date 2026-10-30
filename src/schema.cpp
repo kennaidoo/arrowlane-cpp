@@ -3,6 +3,8 @@
 #include <string>
 #include <utility>
 
+#include "detail/type_traits.hpp"
+
 namespace arrowlane {
 namespace {
 
@@ -116,16 +118,29 @@ Type Type::duration(std::uint8_t time_unit) {
 }
 
 bool Type::is_variable_length() const noexcept {
-    return kind == Kind::Utf8 || kind == Kind::LargeUtf8 || kind == Kind::Binary ||
-           kind == Kind::LargeBinary;
+    return detail::type_traits(kind).variable_length;
 }
 
 bool Type::has_offsets_64() const noexcept {
-    return kind == Kind::LargeUtf8 || kind == Kind::LargeBinary;
+    return detail::type_traits(kind).offset_width == 8;
 }
 
 std::uint8_t Type::offset_width() const noexcept {
-    return has_offsets_64() ? 8 : 4;
+    return detail::type_traits(kind).offset_width;
+}
+
+std::uint8_t Type::schema_tag() const noexcept {
+    return detail::type_traits(kind).schema_tag;
+}
+
+bool Type::json_supported() const noexcept {
+    if (kind == Kind::Float && float_bits == 16) {
+        return false;
+    }
+    if (kind == Kind::Decimal && bit_width == 256) {
+        return false;
+    }
+    return true;
 }
 
 std::size_t Type::width() const noexcept {

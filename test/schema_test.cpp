@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "detail/bytes.hpp"
+#include "detail/type_traits.hpp"
 
 AL_TEST(schema_type_names) {
     AL_CHECK_EQ(arrowlane::Type::null().name(), std::string("null"));
@@ -117,4 +118,26 @@ AL_TEST(schema_message_rejects_bad_input) {
                  arrowlane::Code::TruncatedFrame);
     const std::vector<std::byte> empty(8);
     AL_CHECK_ERR(arrowlane::decode_schema_message(empty), arrowlane::Code::BadHeader);
+}
+
+AL_TEST(type_metadata_is_complete) {
+    using arrowlane::Type;
+    for (std::size_t index = 0;
+         index < arrowlane::detail::kTypeTraits.size(); ++index) {
+        const auto kind = static_cast<Type::Kind>(index);
+        const auto& traits = arrowlane::detail::type_traits(kind);
+        AL_CHECK(!traits.family.empty());
+        AL_CHECK(traits.schema_tag != 0);
+        AL_CHECK(traits.offset_width == 0 || traits.offset_width == 4 ||
+                 traits.offset_width == 8);
+    }
+    AL_CHECK_EQ(Type::integer(64, true).schema_tag(), std::uint8_t{2});
+    AL_CHECK_EQ(Type::large_utf8().schema_tag(), std::uint8_t{20});
+    AL_CHECK(!Type::floating(16).json_supported());
+    AL_CHECK(!Type::decimal(9, 2, 256).json_supported());
+    AL_CHECK(Type::decimal(9, 2, 128).json_supported());
+    const auto large_binary = arrowlane::detail::kind_for_tag(19);
+    AL_CHECK(large_binary.has_value());
+    AL_CHECK(large_binary && *large_binary == Type::Kind::LargeBinary);
+    AL_CHECK(!arrowlane::detail::kind_for_tag(12).has_value());
 }

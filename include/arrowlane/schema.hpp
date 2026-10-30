@@ -58,6 +58,8 @@ struct Type {
     [[nodiscard]] bool is_variable_length() const noexcept;
     [[nodiscard]] bool has_offsets_64() const noexcept;
     [[nodiscard]] std::uint8_t offset_width() const noexcept;
+    [[nodiscard]] std::uint8_t schema_tag() const noexcept;
+    [[nodiscard]] bool json_supported() const noexcept;
     [[nodiscard]] std::size_t width() const noexcept;
     [[nodiscard]] std::string name() const;
 };

@@ -197,10 +197,6 @@ Result<JsonValue> encode_value(const Type& type, const Column& column,
         }
         case Type::Kind::Decimal: {
             const auto bytes = column.data.bytes().subspan(index * width, width);
-            if (type.bit_width != 128) {
-                return std::unexpected(make_error(
-                    Code::Unsupported, "json lane cannot encode decimal256"));
-            }
             const std::span<const std::byte, 16> fixed(bytes.data(), 16);
             return tagged("dec", detail::decimal128_to_text(fixed, type.scale));
         }
@@ -261,9 +257,9 @@ Result<JsonValue> encode_value(const Type& type, const Column& column,
 
 Result<std::string> encode_json_payload(const RecordBatch& batch) {
     for (const Field& field : batch.schema.fields) {
-        if (field.type.kind == Type::Kind::Float && field.type.float_bits == 16) {
-            return std::unexpected(
-                make_error(Code::Unsupported, "json lane cannot encode float16"));
+        if (!field.type.json_supported()) {
+            return std::unexpected(make_error(
+                Code::Unsupported, "json lane cannot encode " + field.type.name()));
         }
     }
     std::string payload;
@@ -538,10 +534,6 @@ Result<void> decode_value(const Field& field, const JsonValue& value,
             return {};
         }
         case Type::Kind::Decimal: {
-            if (type.bit_width != 128) {
-                return std::unexpected(make_error(
-                    Code::Unsupported, "json lane cannot decode decimal256"));
-            }
             const JsonValue* raw = tagged_value(value, "dec");
             if (!raw || raw->kind() != JsonValue::Kind::String) {
                 return std::unexpected(bad_row(field.name, row, "is not a decimal tag"));
@@ -628,6 +620,12 @@ Result<void> decode_value(const Field& field, const JsonValue& value,
 }
 
 Result<RecordBatch> decode_json_payload(const Schema& schema, std::string_view payload) {
+    for (const Field& field : schema.fields) {
+        if (!field.type.json_supported()) {
+            return std::unexpected(make_error(
+                Code::Unsupported, "json lane cannot decode " + field.type.name()));
+        }
+    }
     std::vector<ColumnBuilder> builders;
     builders.reserve(schema.fields.size());
     for (const Field& field : schema.fields) {

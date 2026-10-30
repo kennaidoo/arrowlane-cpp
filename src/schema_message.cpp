@@ -8,32 +8,13 @@
 #include "detail/bytes.hpp"
 #include "detail/flatbuf.hpp"
 #include "detail/schema_tags.hpp"
+#include "detail/type_traits.hpp"
 
 namespace arrowlane {
 namespace {
 
 using detail::FlatReader;
 using detail::FlatWriter;
-
-std::uint8_t type_tag(const Type& type) noexcept {
-    switch (type.kind) {
-        case Type::Kind::Null: return detail::kTypeNull;
-        case Type::Kind::Int: return detail::kTypeInt;
-        case Type::Kind::Float: return detail::kTypeFloating;
-        case Type::Kind::Binary: return detail::kTypeBinary;
-        case Type::Kind::Utf8: return detail::kTypeUtf8;
-        case Type::Kind::Bool: return detail::kTypeBool;
-        case Type::Kind::Decimal: return detail::kTypeDecimal;
-        case Type::Kind::Date: return detail::kTypeDate;
-        case Type::Kind::Time: return detail::kTypeTime;
-        case Type::Kind::Timestamp: return detail::kTypeTimestamp;
-        case Type::Kind::FixedSizeBinary: return detail::kTypeFixedSizeBinary;
-        case Type::Kind::Duration: return detail::kTypeDuration;
-        case Type::Kind::LargeBinary: return detail::kTypeLargeBinary;
-        case Type::Kind::LargeUtf8: return detail::kTypeLargeUtf8;
-    }
-    return 0;
-}
 
 std::size_t write_type_table(FlatWriter& writer, const Type& type) {
     switch (type.kind) {
@@ -129,13 +110,19 @@ Error bad_header(const std::string& message) {
 
 Result<Type> read_type(const FlatReader& reader, const FlatReader::Table& field_table,
                        std::uint8_t tag) {
-    switch (tag) {
-        case detail::kTypeNull: return Type::null();
-        case detail::kTypeBool: return Type::boolean();
-        case detail::kTypeUtf8: return Type::utf8();
-        case detail::kTypeLargeUtf8: return Type::large_utf8();
-        case detail::kTypeBinary: return Type::binary();
-        case detail::kTypeLargeBinary: return Type::large_binary();
+    const auto kind = detail::kind_for_tag(tag);
+    if (!kind) {
+        return std::unexpected(make_error(Code::Unsupported,
+                                          "schema uses an unsupported type: " +
+                                              std::to_string(tag)));
+    }
+    switch (*kind) {
+        case Type::Kind::Null: return Type::null();
+        case Type::Kind::Bool: return Type::boolean();
+        case Type::Kind::Utf8: return Type::utf8();
+        case Type::Kind::LargeUtf8: return Type::large_utf8();
+        case Type::Kind::Binary: return Type::binary();
+        case Type::Kind::LargeBinary: return Type::large_binary();
         default: break;
     }
     const auto type_pos = reader.target(field_table, 3);
@@ -146,14 +133,14 @@ Result<Type> read_type(const FlatReader& reader, const FlatReader::Table& field_
     if (!table) {
         return std::unexpected(bad_header("type table is not a flatbuffer table"));
     }
-    switch (tag) {
-        case detail::kTypeInt: {
+    switch (*kind) {
+        case Type::Kind::Int: {
             const auto bits = reader.i32(*table, 0);
             if (!bits) return std::unexpected(bad_header("int type carries no bit width"));
             const auto sign = reader.u8(*table, 1).value_or(0);
             return Type::integer(static_cast<std::uint16_t>(*bits), sign != 0);
         }
-        case detail::kTypeFloating: {
+        case Type::Kind::Float: {
             const std::int16_t precision = reader.i16(*table, 0).value_or(0);
             if (precision < 0 || precision > 2) {
                 return std::unexpected(bad_header("floating precision must be 0..2"));
@@ -161,7 +148,7 @@ Result<Type> read_type(const FlatReader& reader, const FlatReader::Table& field_
             const std::uint16_t bits = precision == 0 ? 16 : (precision == 1 ? 32 : 64);
             return Type::floating(static_cast<std::uint8_t>(bits));
         }
-        case detail::kTypeDecimal: {
+        case Type::Kind::Decimal: {
             const auto precision = reader.i32(*table, 0);
             const auto scale = reader.i32(*table, 1);
             if (!precision || !scale) {
@@ -170,17 +157,17 @@ Result<Type> read_type(const FlatReader& reader, const FlatReader::Table& field_
             const std::int32_t bits = reader.i32(*table, 2).value_or(128);
             return Type::decimal(*precision, *scale, static_cast<std::uint16_t>(bits));
         }
-        case detail::kTypeDate: {
+        case Type::Kind::Date: {
             const std::int16_t unit = reader.i16(*table, 0).value_or(1);
             return Type::date(static_cast<std::uint8_t>(unit));
         }
-        case detail::kTypeTime: {
+        case Type::Kind::Time: {
             const std::int16_t unit = reader.i16(*table, 0).value_or(1);
             const std::int32_t bits = reader.i32(*table, 1).value_or(32);
             return Type::time(static_cast<std::uint8_t>(unit),
                               static_cast<std::uint16_t>(bits));
         }
-        case detail::kTypeTimestamp: {
+        case Type::Kind::Timestamp: {
             const std::int16_t unit = reader.i16(*table, 0).value_or(0);
             std::string zone;
             if (reader.field(*table, 1)) {
@@ -190,11 +177,11 @@ Result<Type> read_type(const FlatReader& reader, const FlatReader::Table& field_
             }
             return Type::timestamp(static_cast<std::uint8_t>(unit), std::move(zone));
         }
-        case detail::kTypeDuration: {
+        case Type::Kind::Duration: {
             const std::int16_t unit = reader.i16(*table, 0).value_or(1);
             return Type::duration(static_cast<std::uint8_t>(unit));
         }
-        case detail::kTypeFixedSizeBinary: {
+        case Type::Kind::FixedSizeBinary: {
             const auto width = reader.i32(*table, 0);
             if (!width) {
                 return std::unexpected(bad_header("fixed size binary type carries no width"));
@@ -203,9 +190,8 @@ Result<Type> read_type(const FlatReader& reader, const FlatReader::Table& field_
         }
         default: break;
     }
-    return std::unexpected(make_error(Code::Unsupported,
-                                      "schema uses an unsupported type: " +
-                                          std::to_string(tag)));
+    return std::unexpected(
+        make_error(Code::Unsupported, "schema field type is not readable"));
 }
 
 }  // namespace
@@ -237,7 +223,7 @@ Result<std::vector<std::byte>> encode_schema_message(const Schema& schema) {
         auto field_table = writer.begin_table(6);
         const std::size_t name_field = writer.add_offset(field_table, 0);
         writer.add_bool(field_table, 1, field.nullable);
-        writer.add_u8(field_table, 2, type_tag(field.type));
+        writer.add_u8(field_table, 2, field.type.schema_tag());
         const std::size_t type_field = writer.add_offset(field_table, 3);
         const std::size_t children_field = writer.add_offset(field_table, 5);
         writer.end_table(field_table);
