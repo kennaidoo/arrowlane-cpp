@@ -66,12 +66,14 @@ AL_TEST(alloc_json_encode_is_bounded) {
     AL_REQUIRE(encoded.has_value());
     std::printf("BUDGET json_encode allocations=%zu bytes=%zu\n", counter.allocations,
                 counter.bytes);
-    // Measured 2026-10-30: 309673 allocations for 1000 rows, which is about
-    // 310 per row. That breaks the plan's rule that json encode makes no per
-    // row allocation, and it is the reason the json lane costs 8 microseconds
-    // per row. The budget pins the measured number so it cannot get worse; the
-    // open task is to emit rows into one reusable buffer.
-    AL_CHECK(counter.allocations <= 320000);
+    // The plan's target was 5000 allocations for 1000 rows, which needs value
+    // formatters that write into a caller buffer. This rewrite removed the per
+    // row object and the per row serialisation, so the count fell from 309673
+    // to 163731 and the bytes from 12599013 to 5362161, with byte identical
+    // output. The rest is inside encode_value: a JsonValue and a std::string
+    // per value, and decimal formatting above all. The budget pins today's
+    // number so it cannot regress, and the target stays open.
+    AL_CHECK(counter.allocations <= 170000);
 }
 
 AL_TEST(alloc_ipc_encode_is_bounded) {

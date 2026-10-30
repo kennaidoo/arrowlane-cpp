@@ -62,4 +62,9 @@ private:
 
 [[nodiscard]] std::string json_write_sorted(const JsonValue& value);
 
+// Append one value or one string to an existing buffer. Same bytes as
+// json_write, without building an intermediate string per value.
+void json_append_value(std::string& out, const JsonValue& value);
+void json_append_string(std::string& out, std::string_view text);
+
 }  // namespace arrowlane

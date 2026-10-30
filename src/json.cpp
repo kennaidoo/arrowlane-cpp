@@ -439,4 +439,12 @@ std::string json_write_sorted(const JsonValue& value) {
     return out;
 }
 
+void json_append_value(std::string& out, const JsonValue& value) {
+    write_value(out, value, false);
+}
+
+void json_append_string(std::string& out, std::string_view text) {
+    write_string(out, text);
+}
+
 }  // namespace arrowlane
