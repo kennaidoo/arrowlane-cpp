@@ -1,12 +1,18 @@
 #include "harness.hpp"
 
+#include "arrowlane/digest.hpp"
+#include "arrowlane/fixture.hpp"
 #include "arrowlane/ipc.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <fstream>
+#include <memory>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "detail/bytes.hpp"
 
@@ -30,6 +36,38 @@ arrowlane::RecordBatch make_two_column_batch() {
     batch.columns.push_back(id.finish());
     batch.columns.push_back(name.finish());
     return batch;
+}
+
+std::vector<std::byte> read_fixture(const char* name) {
+    const std::string path = std::string(AL_FIXTURE_DIR) + "/" + name;
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) return {};
+    stream.seekg(0, std::ios::end);
+    const auto size = static_cast<std::size_t>(stream.tellg());
+    stream.seekg(0, std::ios::beg);
+    std::vector<std::byte> bytes(size);
+    if (size > 0) {
+        stream.read(reinterpret_cast<char*>(bytes.data()),
+                    static_cast<std::streamsize>(size));
+    }
+    return bytes;
+}
+
+void check_matches_fixture(const arrowlane::RecordBatch& decoded,
+                           const arrowlane::RecordBatch& expected) {
+    AL_CHECK(decoded.schema == expected.schema);
+    AL_CHECK_EQ(decoded.rows(), expected.rows());
+    for (std::size_t index = 0; index < expected.columns.size(); ++index) {
+        const auto want = arrowlane::column_digest(expected.columns[index],
+                                                   expected.schema.fields[index].type);
+        const auto got = arrowlane::column_digest(decoded.columns[index],
+                                                  decoded.schema.fields[index].type);
+        if (got != want) {
+            std::printf("digest mismatch at column %s\n",
+                        expected.schema.fields[index].name.c_str());
+        }
+        AL_CHECK_EQ(got, want);
+    }
 }
 
 }  // namespace
@@ -86,4 +124,46 @@ AL_TEST(ipc_stream_layout) {
                 0xFFFFFFFFU);
     AL_CHECK_EQ(arrowlane::detail::load_le<std::uint32_t>(stream->data() + total - 4),
                 std::uint32_t{0});
+}
+
+AL_TEST(ipc_roundtrip) {
+    const auto batch = arrowlane::make_fixture(3);
+    auto stream = arrowlane::encode_ipc(batch);
+    AL_REQUIRE(stream.has_value());
+    auto decoded = arrowlane::decode_ipc(*stream);
+    if (!decoded) {
+        std::printf("decode error: %s\n", decoded.error().to_string().c_str());
+    }
+    AL_REQUIRE(decoded.has_value());
+    check_matches_fixture(*decoded, batch);
+}
+
+AL_TEST(ipc_reads_a_pyarrow_stream) {
+    const auto bytes = read_fixture("pyarrow_3row.aln");
+    AL_REQUIRE(!bytes.empty());
+    auto decoded = arrowlane::decode_ipc(bytes);
+    if (!decoded) {
+        std::printf("decode error: %s\n", decoded.error().to_string().c_str());
+    }
+    AL_REQUIRE(decoded.has_value());
+    check_matches_fixture(*decoded, arrowlane::make_fixture(3));
+}
+
+AL_TEST(ipc_reads_a_pyarrow_two_batch_stream) {
+    const auto bytes = read_fixture("pyarrow_3row_2batch.aln");
+    AL_REQUIRE(!bytes.empty());
+    auto decoded = arrowlane::decode_ipc(bytes);
+    if (!decoded) {
+        std::printf("decode error: %s\n", decoded.error().to_string().c_str());
+    }
+    AL_REQUIRE(decoded.has_value());
+    check_matches_fixture(*decoded, arrowlane::make_fixture(3));
+}
+
+AL_TEST(ipc_rejects_a_truncated_stream) {
+    const auto batch = arrowlane::make_fixture(3);
+    auto stream = arrowlane::encode_ipc(batch);
+    AL_REQUIRE(stream.has_value());
+    const std::vector<std::byte> cut(stream->begin(), stream->end() - 9);
+    AL_CHECK_ERR(arrowlane::decode_ipc(cut), arrowlane::Code::TruncatedFrame);
 }

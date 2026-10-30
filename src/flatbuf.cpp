@@ -266,6 +266,14 @@ std::optional<FlatReader::Vector> FlatReader::vector(const Table& table,
     return result;
 }
 
+std::optional<std::span<const std::byte>> FlatReader::struct_at(
+    const Vector& vector, std::size_t index, std::size_t size) const {
+    if (index >= vector.count) return std::nullopt;
+    const std::size_t start = vector.data + index * size;
+    if (start > data_.size() || size > data_.size() - start) return std::nullopt;
+    return data_.subspan(start, size);
+}
+
 std::optional<std::size_t> FlatReader::element_target(const Vector& vector,
                                                       std::size_t index) const {
     if (index >= vector.count) return std::nullopt;

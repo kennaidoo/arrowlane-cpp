@@ -73,6 +73,8 @@ if(AL_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.cpp")
     get_filename_component(test_name "${test_source}" NAME_WE)
     add_executable(${test_name} "${test_source}")
     target_link_libraries(${test_name} PRIVATE al_test_main)
+    target_compile_definitions(${test_name} PRIVATE
+      AL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures")
     add_test(NAME ${test_name} COMMAND ${test_name})
   endforeach()
 endif()

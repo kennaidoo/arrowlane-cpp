@@ -94,6 +94,8 @@ public:
     [[nodiscard]] std::optional<std::string_view> string(const Table& table,
                                                          std::size_t slot) const;
     [[nodiscard]] std::optional<Vector> vector(const Table& table, std::size_t slot) const;
+    [[nodiscard]] std::optional<std::span<const std::byte>> struct_at(
+        const Vector& vector, std::size_t index, std::size_t size) const;
     [[nodiscard]] std::optional<std::size_t> element_target(const Vector& vector,
                                                              std::size_t index) const;
 
