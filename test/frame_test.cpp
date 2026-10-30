@@ -2,6 +2,7 @@
 
 #include "arrowlane/crc32.hpp"
 #include "arrowlane/frame.hpp"
+#include "arrowlane/json.hpp"
 #include "detail/bytes.hpp"
 
 #include <array>
@@ -113,4 +114,47 @@ AL_TEST(frame_stream_truncated_payload) {
     const std::string bytes = out.str();
     std::istringstream in(bytes.substr(0, bytes.size() - 1));
     AL_CHECK_ERR(arrowlane::read_frame(in), arrowlane::Code::TruncatedFrame);
+}
+
+namespace {
+
+arrowlane::JsonValue chunk_header(const char* id, std::int64_t index, bool last) {
+    arrowlane::JsonValue value = arrowlane::JsonValue::make_object();
+    value.set("id", arrowlane::JsonValue(std::string(id)));
+    value.set("index", arrowlane::JsonValue(index));
+    value.set("last", arrowlane::JsonValue(last));
+    return value;
+}
+
+}  // namespace
+
+AL_TEST(chunk_metadata_accepts_a_valid_triple) {
+    const auto value = chunk_header("0123456789abcdef0123456789abcdef", 0, false);
+    auto parsed = arrowlane::parse_chunk(value);
+    AL_REQUIRE(parsed.has_value());
+    AL_CHECK_EQ(parsed->id.size(), std::size_t{32});
+    AL_CHECK_EQ(parsed->index, std::uint64_t{0});
+    AL_CHECK(!parsed->last);
+}
+
+AL_TEST(chunk_metadata_rejects_uppercase) {
+    const auto value = chunk_header("0123456789ABCDEF0123456789abcdef", 0, false);
+    AL_CHECK_ERR(arrowlane::parse_chunk(value), arrowlane::Code::Chunk);
+}
+
+AL_TEST(chunk_metadata_rejects_a_short_id) {
+    const auto value = chunk_header("0123456789abcdef0123456789abcde", 0, false);
+    AL_CHECK_ERR(arrowlane::parse_chunk(value), arrowlane::Code::Chunk);
+}
+
+AL_TEST(chunk_metadata_rejects_the_index_cap) {
+    const auto value = chunk_header("0123456789abcdef0123456789abcdef", 1'000'000, false);
+    AL_CHECK_ERR(arrowlane::parse_chunk(value), arrowlane::Code::Chunk);
+}
+
+AL_TEST(chunk_metadata_rejects_a_missing_key) {
+    arrowlane::JsonValue value = arrowlane::JsonValue::make_object();
+    value.set("id", arrowlane::JsonValue(std::string("0123456789abcdef0123456789abcdef")));
+    value.set("index", arrowlane::JsonValue(std::int64_t{0}));
+    AL_CHECK_ERR(arrowlane::parse_chunk(value), arrowlane::Code::Chunk);
 }
