@@ -67,6 +67,12 @@ struct FrameView {
     std::span<const std::byte> data, std::size_t max_payload = kMaxPayloadBytes,
     std::size_t max_uncompressed = kMaxUncompressedBytes);
 
+// Bytes the first frame in `data` occupies. A chunked file is a run of frames,
+// so a reader needs the length before it can slice one out.
+[[nodiscard]] Result<std::size_t> frame_size(
+    std::span<const std::byte> data, std::size_t max_payload = kMaxPayloadBytes,
+    std::size_t max_uncompressed = kMaxUncompressedBytes);
+
 [[nodiscard]] Result<FrameView> decode_frame_view(
     std::span<const std::byte> data, std::size_t max_payload = kMaxPayloadBytes,
     std::size_t max_uncompressed = kMaxUncompressedBytes);

@@ -370,6 +370,21 @@ Result<std::uint64_t> write_frame(std::ostream& stream, const Frame& frame,
                                       parts->payload.size());
 }
 
+Result<std::size_t> frame_size(std::span<const std::byte> data,
+                                    std::size_t max_payload,
+                                    std::size_t max_uncompressed) {
+    auto prefix = read_prefix(data, max_payload, max_uncompressed);
+    if (!prefix) return std::unexpected(prefix.error());
+    const std::size_t total = kPrefixSize + prefix->header_len +
+                              static_cast<std::size_t>(prefix->payload_len);
+    if (total > data.size()) {
+        return std::unexpected(make_error(
+            Code::TruncatedFrame, "frame needs " + std::to_string(total) +
+                                      " bytes, carries " + std::to_string(data.size())));
+    }
+    return total;
+}
+
 Result<std::optional<Frame>> read_frame(std::istream& stream, std::size_t max_payload,
                                         std::size_t max_uncompressed) {
     std::array<std::byte, kPrefixSize> prefix{};

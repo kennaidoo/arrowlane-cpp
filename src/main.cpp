@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "arrowlane/chunks.hpp"
 #include "arrowlane/costmodel.hpp"
 #include "arrowlane/digest.hpp"
 #include "arrowlane/fixture.hpp"
@@ -117,7 +118,8 @@ int usage() {
                  "  arrowlane-cpp describe [--compact]\n"
                  "  arrowlane-cpp bench [--rows N] [--repeats N] [--json]\n"
                  "  arrowlane-cpp pack --lane L [--rows N | --in FILE] --out FILE\n"
-                 "  arrowlane-cpp unpack FILE [--json]\n"
+                 "                          [--chunks] [--rows-per-chunk N]\n"
+                 "  arrowlane-cpp unpack FILE [--json | --chunks]\n"
                  "  arrowlane-cpp debug-schema one|fixture|types\n"
                  "  arrowlane-cpp debug-schema read FILE\n",
                  arrowlane::kVersion);
@@ -145,7 +147,7 @@ std::vector<std::byte> read_file(const char* path) {
 }
 
 int pack_command(const char* lane_text, std::int64_t rows, const char* out_path,
-                 const char* in_path) {
+                 const char* in_path, bool chunks, std::int64_t rows_per_chunk) {
     const auto lane = arrowlane::lane_id_from_name(lane_text);
     if (!lane) {
         std::fprintf(stderr, "error: UnknownLane: no lane named %s\n", lane_text);
@@ -163,6 +165,29 @@ int pack_command(const char* lane_text, std::int64_t rows, const char* out_path,
         batch = std::move(*decoded);
     } else {
         batch = arrowlane::make_fixture(rows);
+    }
+    if (chunks) {
+        auto valid = arrowlane::validate_chunk_options(
+            static_cast<std::size_t>(rows_per_chunk), arrowlane::kMaxPayloadBytes);
+        if (!valid) return fail(valid.error());
+        std::ofstream chunk_stream(out_path, std::ios::binary);
+        if (!chunk_stream) {
+            std::fprintf(stderr, "error: IoError: cannot open %s\n", out_path);
+            return 1;
+        }
+        arrowlane::ChunkProducer producer(std::move(batch), *lane,
+                                          static_cast<std::size_t>(rows_per_chunk),
+                                          arrowlane::kMaxPayloadBytes);
+        std::vector<std::byte> chunk_wire;
+        while (producer.next(chunk_wire)) {
+            chunk_stream.write(reinterpret_cast<const char*>(chunk_wire.data()),
+                               static_cast<std::streamsize>(chunk_wire.size()));
+        }
+        if (producer.failed()) {
+            return fail(arrowlane::make_error(producer.failure_code(),
+                                             producer.failure_message()));
+        }
+        return 0;
     }
     auto frame = arrowlane::encode_lane(*lane, batch);
     if (!frame) return fail(frame.error());
@@ -255,6 +280,38 @@ int select_command(std::int64_t rows, std::int64_t bytes, const char* topology_t
     }
     root.set("rejected", std::move(rejected));
     std::printf("%s\n", arrowlane::json_write(root).c_str());
+    return 0;
+}
+
+int unpack_chunks_command(const char* path) {
+    const auto bytes = read_file(path);
+    if (bytes.empty()) {
+        std::fprintf(stderr, "error: IoError: cannot read %s\n", path);
+        return 1;
+    }
+    const std::span<const std::byte> all(bytes);
+    arrowlane::ChunkAssembler assembler;
+    std::size_t offset = 0;
+    std::int64_t rows = 0;
+    std::uint64_t chunks = 0;
+    while (offset < all.size()) {
+        auto size = arrowlane::frame_size(all.subspan(offset));
+        if (!size) return fail(size.error());
+        auto batch = assembler.add(all.subspan(offset, *size));
+        if (!batch) return fail(batch.error());
+        rows += batch->rows();
+        ++chunks;
+        offset += *size;
+        if (assembler.finished()) break;
+    }
+    auto complete = assembler.check_complete();
+    if (!complete) return fail(complete.error());
+    if (offset != all.size()) {
+        return fail(arrowlane::make_error(arrowlane::Code::Chunk,
+                                          "trailing bytes after the last chunk"));
+    }
+    std::printf("chunks=%llu rows=%lld\n", static_cast<unsigned long long>(chunks),
+                static_cast<long long>(rows));
     return 0;
 }
 
@@ -397,7 +454,13 @@ int describe_command() {
                                  arrowlane::kMaxChunks)));
     root.set("limits", std::move(limits));
     arrowlane::JsonValue streaming = arrowlane::JsonValue::make_object();
-    streaming.set("chunked", arrowlane::JsonValue(false));
+    streaming.set("chunked", arrowlane::JsonValue(true));
+    streaming.set("default_chunk_rows",
+                  arrowlane::JsonValue(static_cast<std::int64_t>(
+                      arrowlane::kDefaultChunkRows)));
+    streaming.set("max_chunk_rows",
+                  arrowlane::JsonValue(static_cast<std::int64_t>(
+                      arrowlane::kMaxChunkRows)));
     root.set("streaming", std::move(streaming));
     std::printf("%s\n", arrowlane::json_write(root).c_str());
     return 0;
@@ -547,22 +610,48 @@ int main(int argc, char** argv) {
         const char* out_path = nullptr;
         const char* in_path = nullptr;
         std::int64_t rows = 3;
-        for (int index = 2; index + 1 < argc; index += 2) {
+        std::int64_t rows_per_chunk =
+            static_cast<std::int64_t>(arrowlane::kDefaultChunkRows);
+        bool chunks = false;
+        for (int index = 2; index < argc; ++index) {
             const std::string_view flag = argv[index];
-            if (flag == "--lane") lane = argv[index + 1];
-            else if (flag == "--rows") rows = std::strtoll(argv[index + 1], nullptr, 10);
-            else if (flag == "--out") out_path = argv[index + 1];
-            else if (flag == "--in") in_path = argv[index + 1];
+            if (flag == "--chunks") {
+                chunks = true;
+                continue;
+            }
+            if (index + 1 >= argc) return usage();
+            const char* text = argv[++index];
+            if (flag == "--lane") lane = text;
+            else if (flag == "--rows") rows = std::strtoll(text, nullptr, 10);
+            else if (flag == "--out") out_path = text;
+            else if (flag == "--in") in_path = text;
+            else if (flag == "--rows-per-chunk") rows_per_chunk = std::strtoll(text, nullptr, 10);
             else return usage();
         }
         if (!lane || !out_path) return usage();
-        return pack_command(lane, rows, out_path, in_path);
+        return pack_command(lane, rows, out_path, in_path, chunks, rows_per_chunk);
     }
     if (argc >= 3 && std::strcmp(argv[1], "unpack") == 0) {
+        // Flags may come before or after the path.
+        const char* path = nullptr;
         bool as_json = false;
-        if (argc == 4 && std::strcmp(argv[3], "--json") == 0) as_json = true;
-        if (argc > 4) return usage();
-        return unpack_command(argv[2], as_json);
+        bool chunks = false;
+        for (int index = 2; index < argc; ++index) {
+            const std::string_view flag = argv[index];
+            if (flag == "--json") {
+                as_json = true;
+                continue;
+            }
+            if (flag == "--chunks") {
+                chunks = true;
+                continue;
+            }
+            if (path != nullptr) return usage();
+            path = argv[index];
+        }
+        if (path == nullptr) return usage();
+        if (chunks) return unpack_chunks_command(path);
+        return unpack_command(path, as_json);
     }
     if (argc >= 3 && std::strcmp(argv[1], "debug-schema") == 0) {
         const std::string_view case_name = argv[2];
