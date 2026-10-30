@@ -7,16 +7,6 @@
 #include "detail/lanes_internal.hpp"
 
 namespace arrowlane {
-namespace {
-
-Error unavailable(LaneId lane) {
-    return make_error(Code::LaneUnavailable,
-                      std::string("lane ") + std::string(lane_name(lane)) +
-                          " is not available in this build");
-}
-
-}  // namespace
-
 Result<Frame> encode_lane(LaneId lane, const RecordBatch& batch,
                           const LaneOptions& options) {
     switch (lane) {
@@ -25,19 +15,20 @@ Result<Frame> encode_lane(LaneId lane, const RecordBatch& batch,
         case LaneId::IpcZstd:
             return detail::encode_ipc_zstd_lane(
                 batch, options.level < 0 ? 3 : options.level);
-        case LaneId::Shm: return std::unexpected(unavailable(lane));
+        case LaneId::Shm: return detail::encode_shm_lane(batch, options);
     }
     return std::unexpected(make_error(Code::UnknownLane, "unknown lane"));
 }
 
-Result<RecordBatch> decode_lane(const Frame& frame, const LaneOptions& /*options*/,
+Result<RecordBatch> decode_lane(const Frame& frame, const LaneOptions& options,
                                 std::size_t max_uncompressed) {
     switch (frame.lane) {
         case LaneId::Json: return detail::decode_json_lane(frame, max_uncompressed);
         case LaneId::Ipc: return detail::decode_ipc_lane(frame, max_uncompressed);
         case LaneId::IpcZstd:
             return detail::decode_ipc_zstd_lane(frame, max_uncompressed);
-        case LaneId::Shm: return std::unexpected(unavailable(frame.lane));
+        case LaneId::Shm:
+            return detail::decode_shm_lane(frame, options, max_uncompressed);
     }
     return std::unexpected(make_error(Code::UnknownLane, "unknown lane"));
 }
@@ -47,7 +38,13 @@ std::vector<std::string_view> lane_names() {
 }
 
 std::vector<std::string_view> available_lanes() {
+#if defined(_WIN32)
     return {"json", "ipc", "ipc-zstd"};
+#else
+    // The reference lists a lane when the platform satisfies its requirement,
+    // so shm is listed on POSIX even before a segment directory is probed.
+    return {"json", "ipc", "ipc-zstd", "shm"};
+#endif
 }
 
 }  // namespace arrowlane

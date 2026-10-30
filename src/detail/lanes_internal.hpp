@@ -7,6 +7,7 @@
 #include "arrowlane/error.hpp"
 #include "arrowlane/frame.hpp"
 #include "arrowlane/json.hpp"
+#include "arrowlane/lanes.hpp"
 #include "arrowlane/schema.hpp"
 
 namespace arrowlane::detail {
@@ -27,5 +28,11 @@ namespace arrowlane::detail {
 [[nodiscard]] Result<Frame> encode_ipc_zstd_lane(const RecordBatch& batch, int level);
 [[nodiscard]] Result<RecordBatch> decode_ipc_zstd_lane(const Frame& frame,
                                                        std::size_t max_uncompressed);
+
+[[nodiscard]] Result<Frame> encode_shm_lane(const RecordBatch& batch,
+                                           const LaneOptions& options);
+[[nodiscard]] Result<RecordBatch> decode_shm_lane(const Frame& frame,
+                                                  const LaneOptions& options,
+                                                  std::size_t max_uncompressed);
 
 }  // namespace arrowlane::detail
