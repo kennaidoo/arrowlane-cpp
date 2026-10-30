@@ -1,0 +1,7 @@
+#include <string_view>
+
+namespace arrowlane {
+std::string_view builtin_cost_model_json() noexcept {
+    return std::string_view(R"ALJSON(@AL_COST_MODEL_JSON@)ALJSON");
+}
+}

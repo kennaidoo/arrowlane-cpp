@@ -1,0 +1,12 @@
+build/
+build-*/
+vendor/
+.hermes/
+__pycache__/
+*.pyc
+*.exe
+*.obj
+*.pdb
+*.ilk
+.vs/
+.venv/
