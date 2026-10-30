@@ -240,3 +240,19 @@ AL_TEST(ipc_roundtrips_an_empty_batch) {
     AL_CHECK_EQ(decoded->columns.size(), batch.schema.fields.size());
     AL_CHECK(validate_batch(*decoded).has_value());
 }
+
+AL_TEST(canonical_digest_matches_python) {
+    // The eight CRC32 values come from interop/canonical.py over the same three
+    // fixture rows, so this test fails if the C++ value bytes drift from the
+    // Python oracle.
+    const auto batch = arrowlane::make_fixture(3);
+    AL_REQUIRE(batch.columns.size() == 8);
+    const std::uint32_t expected[8] = {1230776174u, 986060978u, 168689230u,
+                                       2438872324u, 402418219u, 194842025u,
+                                       2137657339u, 454640162u};
+    for (std::size_t index = 0; index < 8; ++index) {
+        AL_CHECK_EQ(arrowlane::column_digest(batch.columns[index],
+                                             batch.schema.fields[index].type),
+                    expected[index]);
+    }
+}
