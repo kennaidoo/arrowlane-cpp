@@ -11,3 +11,6 @@ __pycache__/
 .vs/
 .venv/
 tools/feature_probe/*.log
+
+# Run logs
+*.log
