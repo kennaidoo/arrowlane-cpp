@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  cpp    {result.stdout.strip()!r}")
         return 1
 
-    # The shm lane does not exist in C++ until Phase 7, so a ready shm lane
+    # The shm lane does not exist in C++ until Phase 8, so a ready shm lane
     # cannot be compared with the reference yet. The reference offers shm on
     # Linux, where its lane imports, and hides it on Windows. Assert the C++
     # behaviour instead of a parity that cannot hold: shm is rejected as not
@@ -188,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"OK: {ran} cases, lane, reason, ms, bytes, scores and rejected identical")
-    print("OK: shm is rejected as not available until the lane lands in Phase 7")
+    print("OK: shm is rejected as not available until the lane lands in Phase 8")
     return 0
 
 
