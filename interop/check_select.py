@@ -59,7 +59,6 @@ def cases():
                 yield {**base, "allow": "ipc"}
                 yield {**base, "allow": "json,ipc"}
                 yield {**base, "allow": "nope,ipc"}
-                yield {**base, "shm_ready": True}
 
 
 def python_decision(case: dict, model) -> dict:
@@ -168,7 +167,28 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  cpp    {result.stdout.strip()!r}")
         return 1
 
+    # The shm lane does not exist in C++ until Phase 7, so a ready shm lane
+    # cannot be compared with the reference yet. The reference offers shm on
+    # Linux, where its lane imports, and hides it on Windows. Assert the C++
+    # behaviour instead of a parity that cannot hold: shm is rejected as not
+    # available and the choice falls back to a lane that is built.
+    shm_case = ["select", "--rows", "1000", "--bytes", "1000", "--topology",
+                "same_host", "--policy", "latency", "--shm-ready", "--json"]
+    result = subprocess.run([str(exe), *shm_case], capture_output=True, text=True,
+                            check=False)
+    if result.returncode != 0:
+        print(f"FAIL: shm case exited {result.returncode}: {result.stderr.strip()}")
+        return 1
+    decision = json.loads(result.stdout)
+    if ["shm", "NOT_AVAILABLE_ON_PLATFORM"] not in decision["rejected"]:
+        print(f"FAIL: shm should be rejected as not available: {decision['rejected']}")
+        return 1
+    if decision["lane"] == "shm":
+        print("FAIL: shm was chosen but the lane is not built")
+        return 1
+
     print(f"OK: {ran} cases, lane, reason, ms, bytes, scores and rejected identical")
+    print("OK: shm is rejected as not available until the lane lands in Phase 7")
     return 0
 
 
