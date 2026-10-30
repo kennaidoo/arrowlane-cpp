@@ -228,3 +228,15 @@ AL_TEST(view_path_does_not_copy) {
                     column_digest(batch.columns[index], batch.schema.fields[index].type));
     }
 }
+
+AL_TEST(ipc_roundtrips_an_empty_batch) {
+    using namespace arrowlane;
+    const auto batch = make_fixture(0);
+    auto stream = encode_ipc(batch);
+    AL_REQUIRE(stream.has_value());
+    auto decoded = decode_ipc(*stream);
+    AL_REQUIRE(decoded.has_value());
+    AL_CHECK_EQ(decoded->rows(), std::int64_t{0});
+    AL_CHECK_EQ(decoded->columns.size(), batch.schema.fields.size());
+    AL_CHECK(validate_batch(*decoded).has_value());
+}

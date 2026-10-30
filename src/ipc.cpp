@@ -583,8 +583,14 @@ Result<RecordBatch> decode_ipc_view(
             make_error(Code::BadHeader, "stream carries no schema"));
     }
     if (batches.empty()) {
+        // A stream with no record batch still describes its columns. Build one
+        // empty column per field so the batch is self consistent.
         RecordBatch empty;
         empty.schema = std::move(schema);
+        for (const Field& field : empty.schema.fields) {
+            ColumnBuilder builder(field.type);
+            empty.columns.push_back(builder.finish());
+        }
         return empty;
     }
     if (batches.size() == 1) return std::move(batches.front());
