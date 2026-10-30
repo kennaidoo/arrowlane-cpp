@@ -29,12 +29,10 @@ import pyarrow as pa
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from canonical import column_crc32  # noqa: E402
 
-sys.path.insert(
-    0,
-    os.environ.get(
-        "ARROWLANE_SRC", "C:/Users/Ken/projects/personal-projects/arrowlane/src"
-    ),
-)
+_src = os.environ.get("ARROWLANE_SRC")
+if not _src:
+    sys.exit("error: set ARROWLANE_SRC to the arrowlane reference src directory")
+sys.path.insert(0, _src)
 import arrowlane  # noqa: E402
 
 TYPES = [
