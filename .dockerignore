@@ -1,0 +1,8 @@
+# Keep the build context small and stop the container from inheriting a host
+# CMake cache, which would be configured for another toolchain.
+build/
+build-*/
+vendor/
+.git/
+*.log
+bench/results/

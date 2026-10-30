@@ -1,0 +1,4 @@
+# The generated report is tracked on purpose: the numbers are the point.
+latest.json
+fixture-*.aln
+*.log

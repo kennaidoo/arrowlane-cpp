@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -204,6 +205,16 @@ int pack_command(const char* lane_text, std::int64_t rows, const char* out_path,
 }
 
 double round4(double value) { return std::round(value * 10000.0) / 10000.0; }
+
+// Median, matching statistics.median in the reference driver. With an even
+// count it averages the two middle samples.
+double median_of(std::vector<double> samples) {
+    if (samples.empty()) return 0.0;
+    std::sort(samples.begin(), samples.end());
+    const std::size_t middle = samples.size() / 2;
+    if (samples.size() % 2 == 1) return samples[middle];
+    return (samples[middle - 1] + samples[middle]) / 2.0;
+}
 
 std::vector<std::string> split_allowed(const char* text) {
     std::vector<std::string> names;
@@ -478,27 +489,37 @@ double elapsed_ms(std::chrono::steady_clock::time_point from,
     return std::chrono::duration<double, std::milli>(to - from).count();
 }
 
-int bench_command(std::int64_t rows, int repeats, bool as_json) {
+int bench_command(std::int64_t rows, int repeats, bool as_json, bool machine) {
     if (rows < 0 || repeats < 1) {
         std::fprintf(stderr, "error: InvalidArgument: rows must be >= 0 and repeats >= 1\n");
         return 2;
     }
     const auto batch = arrowlane::make_fixture(rows);
-    if (!as_json) {
+    if (!as_json && !machine) {
         std::printf("rows=%lld repeats=%d\n", static_cast<long long>(rows), repeats);
         std::printf("%-10s %12s %12s %12s\n", "lane", "wire_bytes", "enc_ms", "dec_ms");
     }
     std::int64_t sink = 0;
-    for (std::string_view name : arrowlane::available_lanes()) {
+    // The three codec lanes. shm moves bytes through a segment and needs a
+    // token, so it is a transfer path, not a codec, and the reference harness
+    // measures the same three.
+    for (const std::string_view name : {"json", "ipc", "ipc-zstd"}) {
         const auto id = arrowlane::lane_id_from_name(name);
         if (!id) continue;
+        bool available = false;
+        for (std::string_view candidate : arrowlane::available_lanes()) {
+            if (candidate == name) available = true;
+        }
+        if (!available) continue;
         auto frame = arrowlane::encode_lane(*id, batch);
         if (!frame) return fail(frame.error());
         auto wire = arrowlane::encode_frame(*frame);
         if (!wire) return fail(wire.error());
         const auto wire_bytes = static_cast<std::int64_t>(wire->size());
-        double encode_ms = 0.0;
-        double decode_ms = 0.0;
+        std::vector<double> encode_samples;
+        std::vector<double> decode_samples;
+        encode_samples.reserve(static_cast<std::size_t>(repeats));
+        decode_samples.reserve(static_cast<std::size_t>(repeats));
         for (int repeat = 0; repeat < repeats; ++repeat) {
             const auto start = std::chrono::steady_clock::now();
             auto encoded = arrowlane::encode_lane(*id, batch);
@@ -513,11 +534,18 @@ int bench_command(std::int64_t rows, int repeats, bool as_json) {
             if (!decoded) return fail(decoded.error());
             const auto decoded_at = std::chrono::steady_clock::now();
             sink += decoded->rows();
-            encode_ms += elapsed_ms(start, encoded_at);
-            decode_ms += elapsed_ms(encoded_at, decoded_at);
+            encode_samples.push_back(elapsed_ms(start, encoded_at));
+            decode_samples.push_back(elapsed_ms(encoded_at, decoded_at));
         }
-        encode_ms /= static_cast<double>(repeats);
-        decode_ms /= static_cast<double>(repeats);
+        const double encode_ms = median_of(std::move(encode_samples));
+        const double decode_ms = median_of(std::move(decode_samples));
+        if (machine) {
+            // The benchmark protocol: one line per lane, four fields, so the
+            // four implementations can be compared by one parser.
+            std::printf("%s %lld %.3f %.3f\n", std::string(name).c_str(),
+                        static_cast<long long>(wire_bytes), encode_ms, decode_ms);
+            continue;
+        }
         if (as_json) {
             arrowlane::JsonValue entry = arrowlane::JsonValue::make_object();
             entry.set("lane", arrowlane::JsonValue(std::string(name)));
@@ -605,10 +633,15 @@ int main(int argc, char** argv) {
         std::int64_t rows = 2000;
         int repeats = 3;
         bool as_json = false;
+        bool machine = false;
         for (int index = 2; index < argc; ++index) {
             const std::string_view flag = argv[index];
             if (flag == "--json") {
                 as_json = true;
+                continue;
+            }
+            if (flag == "--machine") {
+                machine = true;
                 continue;
             }
             if (index + 1 >= argc) return usage();
@@ -617,7 +650,7 @@ int main(int argc, char** argv) {
             else if (flag == "--repeats") repeats = static_cast<int>(std::strtol(text, nullptr, 10));
             else return usage();
         }
-        return bench_command(rows, repeats, as_json);
+        return bench_command(rows, repeats, as_json, machine);
     }
     if (argc >= 2 && std::strcmp(argv[1], "pack") == 0) {
         const char* lane = nullptr;
