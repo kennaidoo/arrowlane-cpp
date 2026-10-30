@@ -1,0 +1,17 @@
+# arrowlane-cpp
+
+C++23 implementation of the arrowlane wire frame, the Arrow schema flatbuffer
+codec, and four lanes: json, ipc, ipc-zstd, shm.
+
+Reads and writes frame format version 1. Interoperates with the Python package
+arrowlane 0.3.1 in both directions. No Arrow C++ dependency. No Python at
+runtime.
+
+Start here:
+
+- README.md: status, build, test, supported types
+- docs/ai/api.md: the C++ surface, the C ABI, the command line, measured numbers
+- docs/ai/manifest.json: the capability manifest, generated from describe
+- docs/decisions.md: the visibility, version and CRC decisions
+- docs/feature-matrix.md: which language features this toolchain has
+- AGENTS.md: commands and boundaries for automated work

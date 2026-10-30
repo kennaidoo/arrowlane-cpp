@@ -407,18 +407,23 @@ std::string_view lane_media_type(arrowlane::LaneId lane) {
     return "";
 }
 
-int describe_command() {
+int describe_command(bool runtime_details) {
     // The manifest states what this build can do. `chunked` stays false until
     // the chunk stream lands in Phase 7, so a caller is never told a lie.
     arrowlane::JsonValue root = arrowlane::JsonValue::make_object();
     root.set("schema_version", arrowlane::JsonValue(std::int64_t{1}));
     root.set("package", arrowlane::JsonValue(std::string("arrowlane-cpp")));
     root.set("package_version", arrowlane::JsonValue(std::string(arrowlane::kVersion)));
+    // The manifest must not depend on the host or the build, so
+    // `describe --manifest` omits both the build type and per lane
+    // availability. The committed file then matches on every platform.
+    if (runtime_details) {
 #if defined(AL_BUILD_TYPE)
-    root.set("build_type", arrowlane::JsonValue(std::string(AL_BUILD_TYPE)));
+        root.set("build_type", arrowlane::JsonValue(std::string(AL_BUILD_TYPE)));
 #else
-    root.set("build_type", arrowlane::JsonValue(std::string("unknown")));
+        root.set("build_type", arrowlane::JsonValue(std::string("unknown")));
 #endif
+    }
     arrowlane::JsonValue lanes = arrowlane::JsonValue::make_array();
     for (std::string_view name : arrowlane::lane_names()) {
         const auto id = arrowlane::lane_id_from_name(name);
@@ -433,7 +438,9 @@ int describe_command() {
         entry.set("media_type",
                   arrowlane::JsonValue(std::string(lane_media_type(
                       id.value_or(arrowlane::LaneId::Json)))));
-        entry.set("available", arrowlane::JsonValue(available));
+        if (runtime_details) {
+            entry.set("available", arrowlane::JsonValue(available));
+        }
         lanes.push(std::move(entry));
     }
     root.set("lanes", std::move(lanes));
@@ -583,9 +590,16 @@ int main(int argc, char** argv) {
                               as_json);
     }
     if (argc >= 2 && std::strcmp(argv[1], "describe") == 0) {
-        if (argc == 3 && std::strcmp(argv[2], "--compact") != 0) return usage();
-        if (argc > 3) return usage();
-        return describe_command();
+        bool runtime_details = true;
+        for (int index = 2; index < argc; ++index) {
+            if (std::strcmp(argv[index], "--compact") == 0) continue;
+            if (std::strcmp(argv[index], "--manifest") == 0) {
+                runtime_details = false;
+                continue;
+            }
+            return usage();
+        }
+        return describe_command(runtime_details);
     }
     if (argc >= 2 && std::strcmp(argv[1], "bench") == 0) {
         std::int64_t rows = 2000;
