@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -8,11 +9,13 @@
 #include <string_view>
 #include <vector>
 
+#include "arrowlane/costmodel.hpp"
 #include "arrowlane/digest.hpp"
 #include "arrowlane/fixture.hpp"
 #include "arrowlane/ipc.hpp"
 #include "arrowlane/lanes.hpp"
 #include "arrowlane/schema.hpp"
+#include "arrowlane/select.hpp"
 #include "arrowlane/version.hpp"
 
 #if defined(_WIN32)
@@ -103,6 +106,9 @@ int usage() {
                  "\n"
                  "usage:\n"
                  "  arrowlane-cpp --version\n"
+                 "  arrowlane-cpp select --rows N --bytes N [--topology T] [--policy P]\n"
+                 "                          [--allow a,b] [--shm-ready] [--model FILE]\n"
+                 "                          [--json]\n"
                  "  arrowlane-cpp pack --lane L [--rows N | --in FILE] --out FILE\n"
                  "  arrowlane-cpp unpack FILE [--json]\n"
                  "  arrowlane-cpp debug-schema one|fixture|types\n"
@@ -162,6 +168,86 @@ int pack_command(const char* lane_text, std::int64_t rows, const char* out_path,
     }
     stream.write(reinterpret_cast<const char*>(wire->data()),
                  static_cast<std::streamsize>(wire->size()));
+    return 0;
+}
+
+double round4(double value) { return std::round(value * 10000.0) / 10000.0; }
+
+std::vector<std::string> split_allowed(const char* text) {
+    std::vector<std::string> names;
+    if (text == nullptr) return names;
+    std::string current;
+    for (const char* cursor = text;; ++cursor) {
+        const bool end = *cursor == '\0';
+        if (end || *cursor == ',') {
+            const auto first = current.find_first_not_of(" \t");
+            if (first != std::string::npos) {
+                const auto last = current.find_last_not_of(" \t");
+                names.push_back(current.substr(first, last - first + 1));
+            }
+            current.clear();
+            if (end) break;
+            continue;
+        }
+        current.push_back(*cursor);
+    }
+    return names;
+}
+
+int select_command(std::int64_t rows, std::int64_t bytes, const char* topology_text,
+                   const char* policy_text, const char* allow_text, bool shm_ready,
+                   const char* model_path, bool as_json) {
+    arrowlane::Topology topology = arrowlane::Topology::SameNetwork;
+    if (topology_text != nullptr && !arrowlane::parse_topology(topology_text, topology)) {
+        std::fprintf(stderr, "error: Config: unknown topology %s\n", topology_text);
+        return 2;
+    }
+    arrowlane::Policy policy = arrowlane::Policy::Latency;
+    if (policy_text != nullptr && !arrowlane::parse_policy(policy_text, policy)) {
+        std::fprintf(stderr, "error: Config: unknown policy %s\n", policy_text);
+        return 2;
+    }
+    arrowlane::Result<arrowlane::CostModel> model =
+        model_path != nullptr ? arrowlane::CostModel::from_file(model_path)
+                              : arrowlane::CostModel::builtin();
+    if (!model) return fail(model.error());
+
+    arrowlane::Workload workload;
+    workload.rows = rows;
+    workload.arrow_bytes = bytes;
+    auto decision = arrowlane::select_plan(workload, topology, policy, *model,
+                                           split_allowed(allow_text), shm_ready);
+    if (!decision) return fail(decision.error());
+
+    if (!as_json) {
+        std::printf("lane=%s reason=%s predicted_ms=%.3f predicted_bytes=%lld\n",
+                    decision->lane.c_str(), decision->reason.c_str(),
+                    decision->predicted_ms,
+                    static_cast<long long>(decision->predicted_bytes));
+        return 0;
+    }
+    arrowlane::JsonValue root = arrowlane::JsonValue::make_object();
+    root.set("lane", arrowlane::JsonValue(decision->lane));
+    root.set("reason", arrowlane::JsonValue(decision->reason));
+    root.set("predicted_ms", arrowlane::JsonValue(round4(decision->predicted_ms)));
+    root.set("predicted_bytes", arrowlane::JsonValue(decision->predicted_bytes));
+    arrowlane::JsonValue scores = arrowlane::JsonValue::make_array();
+    for (const auto& [name, value] : decision->scores) {
+        arrowlane::JsonValue pair = arrowlane::JsonValue::make_array();
+        pair.push(arrowlane::JsonValue(name));
+        pair.push(arrowlane::JsonValue(round4(value)));
+        scores.push(std::move(pair));
+    }
+    root.set("scores", std::move(scores));
+    arrowlane::JsonValue rejected = arrowlane::JsonValue::make_array();
+    for (const auto& [name, why] : decision->rejected) {
+        arrowlane::JsonValue pair = arrowlane::JsonValue::make_array();
+        pair.push(arrowlane::JsonValue(name));
+        pair.push(arrowlane::JsonValue(why));
+        rejected.push(std::move(pair));
+    }
+    root.set("rejected", std::move(rejected));
+    std::printf("%s\n", arrowlane::json_write(root).c_str());
     return 0;
 }
 
@@ -230,6 +316,52 @@ int main(int argc, char** argv) {
     if (argc >= 2 && std::strcmp(argv[1], "--version") == 0) {
         std::printf("%s\n", arrowlane::kVersion);
         return 0;
+    }
+    if (argc >= 2 && std::strcmp(argv[1], "select") == 0) {
+        std::int64_t rows = 0;
+        std::int64_t bytes = 0;
+        bool have_rows = false;
+        bool have_bytes = false;
+        const char* topology = nullptr;
+        const char* policy = nullptr;
+        const char* allow = nullptr;
+        const char* model = nullptr;
+        bool shm_ready = false;
+        bool as_json = false;
+        for (int index = 2; index < argc; ++index) {
+            const std::string_view flag = argv[index];
+            auto value = [&index, argc, argv]() -> const char* {
+                return index + 1 < argc ? argv[++index] : nullptr;
+            };
+            if (flag == "--rows") {
+                const char* text = value();
+                if (text == nullptr) return usage();
+                rows = std::strtoll(text, nullptr, 10);
+                have_rows = true;
+            } else if (flag == "--bytes") {
+                const char* text = value();
+                if (text == nullptr) return usage();
+                bytes = std::strtoll(text, nullptr, 10);
+                have_bytes = true;
+            } else if (flag == "--topology") {
+                topology = value();
+            } else if (flag == "--policy") {
+                policy = value();
+            } else if (flag == "--allow") {
+                allow = value();
+            } else if (flag == "--model") {
+                model = value();
+            } else if (flag == "--shm-ready") {
+                shm_ready = true;
+            } else if (flag == "--json") {
+                as_json = true;
+            } else {
+                return usage();
+            }
+        }
+        if (!have_rows || !have_bytes) return usage();
+        return select_command(rows, bytes, topology, policy, allow, shm_ready, model,
+                              as_json);
     }
     if (argc >= 2 && std::strcmp(argv[1], "pack") == 0) {
         const char* lane = nullptr;
