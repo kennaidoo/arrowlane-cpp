@@ -49,10 +49,25 @@ struct Frame {
     [[nodiscard]] std::optional<ChunkInfo> chunk() const;
 };
 
+struct FrameView {
+    LaneId lane = LaneId::Json;
+    std::span<const std::byte> payload;
+    std::uint64_t rows = 0;
+    std::uint64_t uncompressed_len = 0;
+    std::uint16_t flags = 0;
+    JsonValue header;
+
+    [[nodiscard]] std::optional<ChunkInfo> chunk() const;
+};
+
 [[nodiscard]] Result<std::vector<std::byte>> encode_frame(
     const Frame& frame, std::size_t max_payload = kMaxPayloadBytes);
 
 [[nodiscard]] Result<Frame> decode_frame(
+    std::span<const std::byte> data, std::size_t max_payload = kMaxPayloadBytes,
+    std::size_t max_uncompressed = kMaxUncompressedBytes);
+
+[[nodiscard]] Result<FrameView> decode_frame_view(
     std::span<const std::byte> data, std::size_t max_payload = kMaxPayloadBytes,
     std::size_t max_uncompressed = kMaxUncompressedBytes);
 

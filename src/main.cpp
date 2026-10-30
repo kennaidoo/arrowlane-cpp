@@ -2,6 +2,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -149,23 +151,33 @@ int unpack_command(const char* path, bool as_json) {
         stream.read(reinterpret_cast<char*>(wire.data()),
                     static_cast<std::streamsize>(size));
     }
-    auto frame = arrowlane::decode_frame(wire);
-    if (!frame) return fail(frame.error());
-    auto batch = arrowlane::decode_lane(*frame);
+    auto owner = std::make_shared<const std::vector<std::byte>>(std::move(wire));
+    const std::span<const std::byte> data(owner->data(), owner->size());
+    auto view = arrowlane::decode_frame_view(data);
+    if (!view) return fail(view.error());
+    auto decode = [&]() -> arrowlane::Result<arrowlane::RecordBatch> {
+        if (view->lane == arrowlane::LaneId::Ipc) {
+            return arrowlane::unpack_view(*view, owner);
+        }
+        auto frame = arrowlane::decode_frame(data);
+        if (!frame) return std::unexpected(frame.error());
+        return arrowlane::decode_lane(*frame);
+    };
+    auto batch = decode();
     if (!batch) return fail(batch.error());
     if (!as_json) {
         std::printf("lane %s rows %lld columns %zu\n",
-                    std::string(arrowlane::lane_name(frame->lane)).c_str(),
+                    std::string(arrowlane::lane_name(view->lane)).c_str(),
                     static_cast<long long>(batch->rows()), batch->columns.size());
         return 0;
     }
     arrowlane::JsonValue root = arrowlane::JsonValue::make_object();
-    root.set("lane", arrowlane::JsonValue(std::string(arrowlane::lane_name(frame->lane))));
+    root.set("lane", arrowlane::JsonValue(std::string(arrowlane::lane_name(view->lane))));
     root.set("rows", arrowlane::JsonValue(batch->rows()));
     root.set("columns",
              arrowlane::JsonValue(static_cast<std::int64_t>(batch->columns.size())));
     root.set("uncompressed_bytes",
-             arrowlane::JsonValue(static_cast<std::int64_t>(frame->uncompressed_len)));
+             arrowlane::JsonValue(static_cast<std::int64_t>(view->uncompressed_len)));
     root.set("wire_bytes", arrowlane::JsonValue(static_cast<std::int64_t>(wire.size())));
     arrowlane::JsonValue schema = arrowlane::JsonValue::make_array();
     for (std::size_t index = 0; index < batch->schema.fields.size(); ++index) {

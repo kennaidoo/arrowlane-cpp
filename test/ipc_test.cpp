@@ -196,3 +196,35 @@ AL_TEST(ipc_lane_rejects_a_header_schema_mismatch) {
     frame->header.set("schema", JsonValue(base64_encode(*message)));
     AL_CHECK_ERR(decode_lane(*frame), Code::Frame);
 }
+
+AL_TEST(view_path_does_not_copy) {
+    using namespace arrowlane;
+    const auto batch = make_fixture(5000);
+    auto frame = encode_lane(LaneId::Ipc, batch);
+    AL_REQUIRE(frame.has_value());
+    auto wire = encode_frame(*frame);
+    AL_REQUIRE(wire.has_value());
+
+    auto owner = std::make_shared<const std::vector<std::byte>>(std::move(*wire));
+    const std::span<const std::byte> data(owner->data(), owner->size());
+    auto view = decode_frame_view(data);
+    AL_REQUIRE(view.has_value());
+    auto decoded = unpack_view(*view, owner);
+    if (!decoded) {
+        std::printf("view decode error: %s\n", decoded.error().to_string().c_str());
+    }
+    AL_REQUIRE(decoded.has_value());
+
+    const auto* base = owner->data();
+    const auto* end = base + owner->size();
+    for (const auto& column : decoded->columns) {
+        const auto* pointer = column.data.bytes().data();
+        AL_CHECK(pointer >= base && pointer < end);
+    }
+    AL_CHECK_EQ(decoded->rows(), batch.rows());
+    for (std::size_t index = 0; index < batch.columns.size(); ++index) {
+        AL_CHECK_EQ(column_digest(decoded->columns[index],
+                                  decoded->schema.fields[index].type),
+                    column_digest(batch.columns[index], batch.schema.fields[index].type));
+    }
+}

@@ -76,13 +76,21 @@ Result<ChunkInfo> parse_chunk(const JsonValue& value) {
     return chunk;
 }
 
-std::optional<ChunkInfo> Frame::chunk() const {
+namespace {
+
+std::optional<ChunkInfo> chunk_of(const JsonValue& header) {
     const JsonValue* value = header.find("chunk");
     if (value == nullptr) return std::nullopt;
     auto parsed = parse_chunk(*value);
     if (!parsed) return std::nullopt;
     return *parsed;
 }
+
+}  // namespace
+
+std::optional<ChunkInfo> Frame::chunk() const { return chunk_of(header); }
+
+std::optional<ChunkInfo> FrameView::chunk() const { return chunk_of(header); }
 
 namespace {
 
@@ -271,10 +279,15 @@ Result<Frame> decode_frame_parts(std::span<const std::byte> prefix_bytes,
     return frame;
 }
 
-}  // namespace
+struct FrameEnvelope {
+    Prefix prefix;
+    std::span<const std::byte> payload;
+    JsonValue header;
+};
 
-Result<Frame> decode_frame(std::span<const std::byte> data, std::size_t max_payload,
-                           std::size_t max_uncompressed) {
+Result<FrameEnvelope> validate_frame(std::span<const std::byte> data,
+                                     std::size_t max_payload,
+                                     std::size_t max_uncompressed) {
     auto prefix = read_prefix(data, max_payload, max_uncompressed);
     if (!prefix) return std::unexpected(prefix.error());
     const std::size_t body_start = kPrefixSize + prefix->header_len;
@@ -285,9 +298,58 @@ Result<Frame> decode_frame(std::span<const std::byte> data, std::size_t max_payl
             "frame declares " + std::to_string(declared) + " bytes, carries " +
                 std::to_string(data.size())));
     }
-    return decode_frame_parts(data.first(kPrefixSize),
-                              data.subspan(kPrefixSize, prefix->header_len),
-                              data.subspan(body_start), max_payload, max_uncompressed);
+    const auto header_bytes = data.subspan(kPrefixSize, prefix->header_len);
+    const auto payload = data.subspan(body_start);
+    auto header = json_parse(std::string_view(
+        reinterpret_cast<const char*>(header_bytes.data()), header_bytes.size()));
+    if (!header) return std::unexpected(header.error());
+    if (!header->is_object()) {
+        return std::unexpected(make_error(Code::BadHeader, "header is not a JSON object"));
+    }
+    if (const JsonValue* chunk_value = header->find("chunk"); chunk_value != nullptr) {
+        auto parsed = parse_chunk(*chunk_value);
+        if (!parsed) {
+            return std::unexpected(make_error(
+                Code::BadHeader,
+                std::string("chunk metadata is invalid: ") + parsed.error().message));
+        }
+    }
+    if (crc32(payload) != prefix->crc) {
+        return std::unexpected(make_error(Code::ChecksumMismatch,
+                                          "payload does not match the frame CRC"));
+    }
+    return FrameEnvelope{*prefix, payload, std::move(*header)};
+}
+
+}  // namespace
+
+Result<Frame> decode_frame(std::span<const std::byte> data, std::size_t max_payload,
+                           std::size_t max_uncompressed) {
+    auto envelope = validate_frame(data, max_payload, max_uncompressed);
+    if (!envelope) return std::unexpected(envelope.error());
+    Frame frame;
+    frame.lane = static_cast<LaneId>(envelope->prefix.lane_id);
+    frame.payload.assign(envelope->payload.begin(), envelope->payload.end());
+    frame.rows = envelope->prefix.rows;
+    frame.uncompressed_len = envelope->prefix.uncompressed_len;
+    frame.flags = envelope->prefix.flags;
+    frame.header = std::move(envelope->header);
+    return frame;
+}
+
+Result<FrameView> decode_frame_view(std::span<const std::byte> data,
+                                    std::size_t max_payload,
+                                    std::size_t max_uncompressed) {
+    auto envelope = validate_frame(data, max_payload, max_uncompressed);
+    if (!envelope) return std::unexpected(envelope.error());
+    FrameView view;
+    view.lane = static_cast<LaneId>(envelope->prefix.lane_id);
+    view.payload = envelope->payload;
+    view.rows = envelope->prefix.rows;
+    view.uncompressed_len = envelope->prefix.uncompressed_len;
+    view.flags = envelope->prefix.flags;
+    view.header = std::move(envelope->header);
+    return view;
 }
 
 Result<std::uint64_t> write_frame(std::ostream& stream, const Frame& frame,

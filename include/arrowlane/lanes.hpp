@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -23,6 +24,13 @@ struct LaneOptions {
 [[nodiscard]] Result<RecordBatch> decode_lane(
     const Frame& frame, const LaneOptions& options = {},
     std::size_t max_uncompressed = kMaxUncompressedBytes);
+// Decodes without copying the payload. `owner` must be the vector the view
+// points into. Only the ipc lane supports this path.
+[[nodiscard]] Result<RecordBatch> unpack_view(
+    const FrameView& view, std::shared_ptr<const std::vector<std::byte>> owner,
+    const LaneOptions& options = {},
+    std::size_t max_uncompressed = kMaxUncompressedBytes);
+
 [[nodiscard]] std::vector<std::string_view> lane_names();
 [[nodiscard]] std::vector<std::string_view> available_lanes();
 
