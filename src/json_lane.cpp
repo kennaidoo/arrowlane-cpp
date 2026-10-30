@@ -1,5 +1,7 @@
 #include "arrowlane/lanes.hpp"
 
+#include "detail/lanes_internal.hpp"
+
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -686,12 +688,7 @@ Result<RecordBatch> decode_json_payload(const Schema& schema, std::string_view p
 
 }  // namespace
 
-Result<Frame> encode_lane(LaneId lane, const RecordBatch& batch,
-                          const LaneOptions& /*options*/) {
-    if (lane != LaneId::Json) {
-        return std::unexpected(make_error(Code::LaneUnavailable,
-                                          "lane is not available in this build"));
-    }
+Result<Frame> detail::encode_json_lane(const RecordBatch& batch) {
     auto valid = validate_batch(batch);
     if (!valid) return std::unexpected(valid.error());
     auto payload = encode_json_payload(batch);
@@ -718,12 +715,8 @@ Result<Frame> encode_lane(LaneId lane, const RecordBatch& batch,
     return frame;
 }
 
-Result<RecordBatch> decode_lane(const Frame& frame, const LaneOptions& /*options*/,
-                                std::size_t max_uncompressed) {
-    if (frame.lane != LaneId::Json) {
-        return std::unexpected(make_error(Code::LaneUnavailable,
-                                          "lane is not available in this build"));
-    }
+Result<RecordBatch> detail::decode_json_lane(const Frame& frame,
+                                             std::size_t max_uncompressed) {
     if (frame.uncompressed_len != frame.payload.size()) {
         return std::unexpected(make_error(
             Code::Frame, "frame declares a different uncompressed length"));
@@ -755,10 +748,5 @@ Result<RecordBatch> decode_lane(const Frame& frame, const LaneOptions& /*options
     return batch;
 }
 
-std::vector<std::string_view> lane_names() {
-    return {"json", "ipc", "ipc-zstd", "shm"};
-}
-
-std::vector<std::string_view> available_lanes() { return {"json"}; }
 
 }  // namespace arrowlane

@@ -1,8 +1,11 @@
 #include "harness.hpp"
 
+#include "arrowlane/base64.hpp"
 #include "arrowlane/digest.hpp"
 #include "arrowlane/fixture.hpp"
+#include "arrowlane/json.hpp"
 #include "arrowlane/ipc.hpp"
+#include "arrowlane/lanes.hpp"
 
 #include <array>
 #include <cstddef>
@@ -166,4 +169,30 @@ AL_TEST(ipc_rejects_a_truncated_stream) {
     AL_REQUIRE(stream.has_value());
     const std::vector<std::byte> cut(stream->begin(), stream->end() - 9);
     AL_CHECK_ERR(arrowlane::decode_ipc(cut), arrowlane::Code::TruncatedFrame);
+}
+
+AL_TEST(ipc_lane_roundtrip) {
+    using namespace arrowlane;
+    const auto batch = make_fixture(3);
+    auto frame = encode_lane(LaneId::Ipc, batch);
+    AL_REQUIRE(frame.has_value());
+    AL_CHECK(frame->lane == LaneId::Ipc);
+    AL_CHECK_EQ(frame->uncompressed_len, frame->payload.size());
+    auto decoded = decode_lane(*frame);
+    AL_REQUIRE(decoded.has_value());
+    check_matches_fixture(*decoded, batch);
+    const auto names = available_lanes();
+    AL_CHECK(names.size() >= 2);
+}
+
+AL_TEST(ipc_lane_rejects_a_header_schema_mismatch) {
+    using namespace arrowlane;
+    auto frame = encode_lane(LaneId::Ipc, make_fixture(3));
+    AL_REQUIRE(frame.has_value());
+    Schema other;
+    other.fields.push_back(Field{"only", Type::integer(64, true), true});
+    auto message = encode_schema_message(other);
+    AL_REQUIRE(message.has_value());
+    frame->header.set("schema", JsonValue(base64_encode(*message)));
+    AL_CHECK_ERR(decode_lane(*frame), Code::Frame);
 }
