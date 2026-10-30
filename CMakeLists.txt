@@ -39,7 +39,7 @@ target_include_directories(arrowlane_core
 target_compile_features(arrowlane_core PUBLIC cxx_std_23)
 target_link_libraries(arrowlane_core PUBLIC al_warnings)
 
-if(AL_BUILD_ZSTD AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/zstd/zstd.h")
+if(AL_BUILD_ZSTD AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/zstd/lib/zstd.h")
   message(STATUS "vendor/zstd is missing; disabling ipc-zstd for this configure")
   set(AL_BUILD_ZSTD OFF)
 endif()

@@ -11,9 +11,21 @@
 #include "detail/lanes_internal.hpp"
 
 namespace arrowlane {
-namespace {
 
-Result<void> check_header(const JsonValue& header, const Schema& schema) {
+Result<JsonValue> detail::lane_header(const Schema& schema,
+                                      std::string_view media_type) {
+    auto message = encode_schema_message(schema);
+    if (!message) return std::unexpected(message.error());
+    JsonValue header = JsonValue::make_object();
+    header.set("schema", JsonValue(base64_encode(*message)));
+    header.set("ncols", JsonValue(static_cast<std::int64_t>(schema.fields.size())));
+    header.set("producer", JsonValue(std::string("arrowlane-cpp/") + kVersion));
+    header.set("media_type", JsonValue(std::string(media_type)));
+    return header;
+}
+
+Result<void> detail::check_frame_schema(const JsonValue& header,
+                                        const Schema& schema) {
     const JsonValue* schema_value = header.find("schema");
     if (!schema_value || schema_value->kind() != JsonValue::Kind::String) {
         return std::unexpected(make_error(Code::BadHeader, "header carries no schema"));
@@ -32,15 +44,14 @@ Result<void> check_header(const JsonValue& header, const Schema& schema) {
     return {};
 }
 
-}  // namespace
-
 Result<Frame> detail::encode_ipc_lane(const RecordBatch& batch) {
     auto valid = validate_batch(batch);
     if (!valid) return std::unexpected(valid.error());
     auto raw = encode_ipc(batch);
     if (!raw) return std::unexpected(raw.error());
-    auto schema_message = encode_schema_message(batch.schema);
-    if (!schema_message) return std::unexpected(schema_message.error());
+    auto header = detail::lane_header(batch.schema,
+                                      "application/vnd.apache.arrow.stream");
+    if (!header) return std::unexpected(header.error());
 
     Frame frame;
     frame.lane = LaneId::Ipc;
@@ -48,13 +59,7 @@ Result<Frame> detail::encode_ipc_lane(const RecordBatch& batch) {
     frame.rows = static_cast<std::uint64_t>(batch.rows());
     frame.uncompressed_len = frame.payload.size();
     frame.flags = 0;
-    JsonValue header = JsonValue::make_object();
-    header.set("schema", JsonValue(base64_encode(*schema_message)));
-    header.set("ncols", JsonValue(static_cast<std::int64_t>(batch.schema.fields.size())));
-    header.set("producer", JsonValue(std::string("arrowlane-cpp/") + kVersion));
-    header.set("media_type",
-               JsonValue(std::string("application/vnd.apache.arrow.stream")));
-    frame.header = std::move(header);
+    frame.header = std::move(*header);
     return frame;
 }
 
@@ -71,7 +76,7 @@ Result<RecordBatch> detail::decode_ipc_lane(const Frame& frame,
     }
     auto batch = decode_ipc(frame.payload, max_uncompressed);
     if (!batch) return std::unexpected(batch.error());
-    auto header_ok = check_header(frame.header, batch->schema);
+    auto header_ok = detail::check_frame_schema(frame.header, batch->schema);
     if (!header_ok) return std::unexpected(header_ok.error());
     if (static_cast<std::uint64_t>(batch->rows()) != frame.rows) {
         return std::unexpected(
@@ -110,7 +115,7 @@ Result<RecordBatch> unpack_view(const FrameView& view,
     const auto base = static_cast<std::size_t>(view.payload.data() - start);
     auto batch = decode_ipc_view(view.payload, owner, base, max_uncompressed);
     if (!batch) return std::unexpected(batch.error());
-    auto header_ok = check_header(view.header, batch->schema);
+    auto header_ok = detail::check_frame_schema(view.header, batch->schema);
     if (!header_ok) return std::unexpected(header_ok.error());
     if (static_cast<std::uint64_t>(batch->rows()) != view.rows) {
         return std::unexpected(
