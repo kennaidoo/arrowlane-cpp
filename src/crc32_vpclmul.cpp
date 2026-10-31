@@ -112,8 +112,8 @@ bool crc32_have_vpclmul() noexcept {
 #if !AL_WIDE_X86
     return false;
 #else
-    int registers[4] = {0, 0, 0, 0};
 #if defined(_MSC_VER)
+    int registers[4] = {0, 0, 0, 0};
     __cpuidex(registers, 7, 0);
     const bool avx2 = (registers[1] & (1 << 5)) != 0;
     const bool vpclmul = (registers[2] & (1 << 10)) != 0;

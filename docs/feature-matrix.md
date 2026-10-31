@@ -79,6 +79,28 @@ Interpretation:
 - The product code keeps the MSVC passing set and the portable fallbacks. No
   source file depends on a GCC only feature.
 
+## CPU instruction probes
+
+These are not language features. They decide which kernel can run, so the answer
+is recorded with the command that produced it.
+
+| Intrinsic | MSVC 14.51 | GCC 16.2.0 | Command |
+|---|---|---|---|
+| `_mm256_clmulepi64_epi128` (256 bit VPCLMULQDQ) | runs | runs | `scripts\probe-vpclmul.cmd`, and the same source with `g++ -O2 -std=c++23 -mavx2 -mvpclmulqdq` |
+
+Both toolchains print the same line on the Ryzen 7 5800X3D:
+
+```text
+avx2=1 vpclmulqdq=1
+PROBE: ran, result=36 3 14 1
+```
+
+Two things follow. MSVC needs `/arch:AVX2` to emit the intrinsic, and it has no
+per function equivalent, so the kernel gets its own translation unit
+(`src/crc32_vpclmul.cpp`) and the rest of the project stays at baseline. GCC
+takes the target attribute instead. The CPU reports `vpclmulqdq` with no
+`avx512f`, which is Zen 3: the 256 bit form exists without AVX-512.
+
 ## Rules
 
 1. Re-run the probe at every toolchain update. A feature that starts to pass
