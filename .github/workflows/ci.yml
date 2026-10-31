@@ -65,3 +65,12 @@ jobs:
         run: cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      # Real Graviton hardware, which is the only way to settle the arm64 rows
+      # that docs/performance.md currently records as not measured.
+      - name: Bench
+        run: ./build/arrowlane-cpp bench --rows 200000 --repeats 5 --json > bench-arm64.json
+      - name: Upload the numbers
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-arm64
+          path: bench-arm64.json
