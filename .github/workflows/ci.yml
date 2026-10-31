@@ -77,6 +77,8 @@ jobs:
       # D5 asks for a paired ratio on a second architecture, which needs both sides
       # measured in the same round. The C++ image is built first so the Rust
       # checkout does not land inside its build context.
+      - name: Build the Wolfi test image
+        run: docker build -t arrowlane-cpp-test:wolfi -f tools/Dockerfile.test .
       - name: Build the C++ benchmark image
         run: docker build -t arrowlane-bench-cpp:local -f bench/Dockerfile.cpp .
       - name: Check out the Rust reference
