@@ -1,6 +1,6 @@
 # Four way comparison
 
-Run 2026-10-31T09:35:24+02:00 on Windows-11-10.0.26300-SP0 with AMD64 Family 25 Model 33 Stepping 2, AuthenticAMD.
+Run 2026-10-31T09:55:27+02:00 on Windows-11-10.0.26300-SP0 with AMD64 Family 25 Model 33 Stepping 2, AuthenticAMD.
 Rows 200000, repeats 7, rounds 3, implementations interleaved inside each round, each in its own container.
 
 ## Method
@@ -20,30 +20,30 @@ Median of the rounds, with the range in brackets.
 
 | Lane | Impl | Wire bytes | Encode ms | Decode ms |
 |---|---|---|---|---|
-| json | cpp | 42505784 | 420.511 [419.206..427.057] | 590.546 [550.509..593.088] |
-| json | python | 42505756 | 2149.249 [2057.714..2247.899] | 2052.513 [1973.270..2079.816] |
-| json | rust | 42505812 | 262.011 [248.045..272.111] | 1204.029 [1174.650..1237.234] |
-| json | zig | 42372426 | 180.133 [177.324..185.798] | 339.865 [329.518..348.563] |
-| ipc | cpp | 12670881 | 1.306 [1.097..1.480] | 1.399 [1.277..1.582] |
-| ipc | python | 12670845 | 19.272 [18.771..19.640] | 3.436 [3.296..3.855] |
-| ipc | rust | 12671117 | 1.883 [1.785..1.987] | 2.741 [2.739..2.831] |
-| ipc | zig | 12670849 | 43.930 [42.961..45.679] | 26.259 [26.017..27.067] |
-| ipc-zstd | cpp | 1608747 | 28.107 [25.894..31.658] | 9.475 [9.116..10.684] |
-| ipc-zstd | python | 1620041 | 27.977 [26.209..30.320] | 20.001 [19.142..21.079] |
-| ipc-zstd | rust | 1625309 | 30.646 [26.199..31.082] | 11.486 [10.736..12.402] |
-| ipc-zstd | zig | 1620045 | 62.386 [60.291..66.337] | 20.964 [20.697..23.807] |
+| json | cpp | 42505784 | 246.668 [243.798..254.676] | 589.337 [586.845..592.738] |
+| json | python | 42505756 | 2290.481 [2249.773..2300.864] | 2157.549 [2103.980..2171.663] |
+| json | rust | 42505812 | 267.012 [252.902..272.253] | 1171.603 [1164.418..1234.781] |
+| json | zig | 42372426 | 190.893 [190.671..193.992] | 351.893 [335.849..356.158] |
+| ipc | cpp | 12670881 | 1.847 [1.550..2.187] | 1.786 [1.400..2.163] |
+| ipc | python | 12670845 | 22.859 [22.052..22.893] | 3.580 [3.399..4.958] |
+| ipc | rust | 12671117 | 1.926 [1.755..2.252] | 2.844 [2.807..2.868] |
+| ipc | zig | 12670849 | 45.428 [45.219..45.429] | 27.501 [26.166..28.196] |
+| ipc-zstd | cpp | 1608747 | 29.806 [28.912..30.943] | 10.257 [9.393..11.923] |
+| ipc-zstd | python | 1620041 | 32.119 [29.884..32.818] | 22.097 [21.200..24.189] |
+| ipc-zstd | rust | 1625309 | 28.465 [27.107..30.457] | 11.165 [10.728..12.033] |
+| ipc-zstd | zig | 1620045 | 64.609 [63.422..66.830] | 22.682 [22.590..24.746] |
 
 ## Win conditions
 
 ```
-WIN           ipc_encode_ms    cpp=1.306 [1.097..1.480]  rust=1.883 [1.785..1.987]  limit=1.695  overlap=no  others: python=19.272 zig=43.930
-WIN           ipc_decode_ms    cpp=1.399 [1.277..1.582]  rust=2.741 [2.739..2.831]  limit=2.193  overlap=no  others: python=3.436 zig=26.259
-WIN           json_encode_ms   cpp=420.511 [419.206..427.057]  python=2149.249 [2057.714..2247.899]  limit=2364.174  overlap=no  others: rust=262.011 zig=180.133
-WIN           json_decode_ms   cpp=590.546 [550.509..593.088]  rust=1204.029 [1174.650..1237.234]  limit=722.417  overlap=no  others: python=2052.513 zig=339.865
+UNDETERMINED  ipc_encode_ms    cpp=1.847 [1.550..2.187]  rust=1.926 [1.755..2.252]  limit=1.733  overlap=yes  others: python=22.859 zig=45.428
+WIN           ipc_decode_ms    cpp=1.786 [1.400..2.163]  rust=2.844 [2.807..2.868]  limit=2.275  overlap=no  others: python=3.580 zig=27.501
+WIN           json_encode_ms   cpp=246.668 [243.798..254.676]  python=2290.481 [2249.773..2300.864]  limit=2519.529  overlap=no  others: rust=267.012 zig=190.893
+WIN           json_decode_ms   cpp=589.337 [586.845..592.738]  rust=1171.603 [1164.418..1234.781]  limit=702.962  overlap=no  others: python=2157.549 zig=351.893
 WIN           ipc_wire_bytes   cpp=12670881 [12670881..12670881]  python=12670845 [12670845..12670845]  limit=12924262  overlap=no  others: rust=12671117 zig=12670849
 ```
 
-ALL WIN CONDITIONS MET
+Undetermined: ipc_encode_ms. The C++ range and the reference range overlap, so no single run settles these rows.
 
 ## Not measured by this harness
 
@@ -53,7 +53,7 @@ Startup time and peak RSS need a shell or a time utility inside the image. The R
 
 | Impl | Image bytes |
 |---|---|
-| cpp | 1258209513 |
+| cpp | 1258210111 |
 | python | 408275466 |
 | rust | 8621689 |
 | zig | 2102909 |

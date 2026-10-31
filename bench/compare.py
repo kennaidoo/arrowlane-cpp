@@ -84,11 +84,6 @@ def field_samples(samples: Samples, impl: str, lane: str, field: int) -> list[fl
     return [sample[field] for sample in samples[impl][lane]]
 
 
-def ranges_overlap(left: tuple[float, float, float],
-                   right: tuple[float, float, float]) -> bool:
-    return not (left[2] < right[1] or right[2] < left[1])
-
-
 def run(argv: list[str]) -> str:
     result = subprocess.run(argv, capture_output=True, text=True, check=False)
     if result.returncode != 0:
@@ -138,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repeats", type=int, default=7)
     parser.add_argument("--rounds", type=int, default=3,
                         help="interleaved rounds; each round measures every impl")
+    parser.add_argument("--impls", default=",".join(IMPLS),
+                        help="comma separated subset, for a focused rerun of one row")
     parser.add_argument("--check", action="store_true",
                         help="exit 1 when a win condition is missed")
     parser.add_argument("--build", action="store_true",
@@ -145,15 +142,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.rows < 1 or args.repeats < 1 or args.rounds < 1:
         parser.error("rows, repeats and rounds must be positive")
+    chosen = [name.strip() for name in args.impls.split(",") if name.strip()]
+    unknown = [name for name in chosen if name not in IMPLS]
+    if unknown or not chosen:
+        parser.error(f"impls must be a subset of {', '.join(IMPLS)}")
     if DOCKER is None:
         raise SystemExit("error: docker is not on PATH")
 
     if args.build:
         build_cpp_image()
 
-    samples: Samples = {impl: {lane: [] for lane in LANES} for impl in IMPLS}
+    samples: Samples = {impl: {lane: [] for lane in LANES} for impl in chosen}
     for round_index in range(args.rounds):
-        for impl in IMPLS:
+        for impl in chosen:
             print(f"round {round_index + 1}/{args.rounds}: {impl}", flush=True)
             measure(impl, args.rows, 1)  # warmup, discarded
             round_result = measure(impl, args.rows, args.repeats)
@@ -169,17 +170,30 @@ def main(argv: list[str] | None = None) -> int:
         lane = condition["lane"]
         field = condition["field"]
 
-        cpp_median, cpp_low, cpp_high = summarise(
-            field_samples(samples, "cpp", lane, field))
-        ref_median, ref_low, ref_high = summarise(
-            field_samples(samples, reference, lane, field))
-        limit = ref_median * condition["ratio"]
-        overlap = ranges_overlap((cpp_median, cpp_low, cpp_high),
-                                 (ref_median, ref_low, ref_high))
+        if reference not in samples or "cpp" not in samples:
+            lines.append(f"SKIPPED       {name:<16} needs {reference} and cpp in --impls")
+            continue
+        cpp_rounds = field_samples(samples, "cpp", lane, field)
+        ref_rounds = field_samples(samples, reference, lane, field)
+        cpp_median, cpp_low, cpp_high = summarise(cpp_rounds)
+        ref_median, ref_low, ref_high = summarise(ref_rounds)
 
-        verdict = "WIN " if cpp_median <= limit else "LOSS"
-        if overlap:
+        # The ratio is taken per round, then summarised. Both sides are measured
+        # inside the same round, so the machine's mood cancels: comparing two
+        # unpaired ranges throws that pairing away and calls a stable row
+        # undetermined. A win needs every round under the threshold, which is a
+        # stronger claim than a median under it.
+        ratios = [cpp / reference_value for cpp, reference_value
+                  in zip(cpp_rounds, ref_rounds)]
+        ratio_median, ratio_low, ratio_high = summarise(ratios)
+        threshold = condition["ratio"]
+        if ratio_high <= threshold:
+            verdict = "WIN "
+        elif ratio_low > threshold:
+            verdict = "LOSS"
+        else:
             verdict = "UNDETERMINED"
+        if verdict == "UNDETERMINED":
             undetermined.append(name)
         if verdict == "LOSS":
             losses.append(name)
@@ -189,12 +203,13 @@ def main(argv: list[str] | None = None) -> int:
 
         others = " ".join(
             f"{impl}={show(summarise(field_samples(samples, impl, lane, field))[0])}"
-            for impl in IMPLS if impl not in ("cpp", reference))
+            for impl in chosen if impl not in ("cpp", reference))
         line = (
             f"{verdict:<13} {name:<16} "
+            f"ratio={ratio_median:.3f} [{ratio_low:.3f}..{ratio_high:.3f}]  "
+            f"threshold={threshold:.2f}  "
             f"cpp={show(cpp_median)} [{show(cpp_low)}..{show(cpp_high)}]  "
             f"{reference}={show(ref_median)} [{show(ref_low)}..{show(ref_high)}]  "
-            f"limit={show(limit)}  overlap={'yes' if overlap else 'no'}  "
             f"others: {others}"
         )
         lines.append(line)
@@ -230,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         "|---|---|---|---|---|",
     ]
     for lane in LANES:
-        for impl in IMPLS:
+        for impl in chosen:
             wire = samples[impl][lane][0][WIRE]
             enc = summarise(field_samples(samples, impl, lane, ENCODE))
             dec = summarise(field_samples(samples, impl, lane, DECODE))
@@ -243,8 +258,9 @@ def main(argv: list[str] | None = None) -> int:
     report += ["```", ""]
     if undetermined:
         report += [
-            f"Undetermined: {', '.join(undetermined)}. The C++ range and the "
-            "reference range overlap, so no single run settles these rows.",
+            f"Undetermined: {', '.join(undetermined)}. Some round put C++ on "
+            "the wrong side of the threshold, so the row is not settled by this "
+            "run.",
             "",
         ]
     if losses:
@@ -274,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(
             {impl: {lane: [list(sample) for sample in samples[impl][lane]]
                     for lane in LANES}
-             for impl in IMPLS},
+             for impl in chosen},
             indent=2,
         ),
         encoding="utf-8",

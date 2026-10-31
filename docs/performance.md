@@ -13,8 +13,11 @@ python bench/compare.py --rows 200000 --repeats 7 --rounds 3 --check
 One machine, one fixture, one row count, three interleaved rounds of seven
 repeats, each implementation in its own container, warm up run discarded. Every
 implementation is measured inside the same round, so a thermal or load change
-hits all four together. Each row below is the median of the rounds with the
-range in brackets. Machine: desktop, Ryzen 7 5800X3D, Windows 11, Docker Desktop
+hits all four together. Each row is the median of the rounds with the range in brackets. The verdict is
+taken on the ratio per round, not on two separate ranges: both sides are measured
+inside the same round, so dividing them cancels the machine's mood. A win needs
+every round under the threshold, which is a stronger claim than a median under
+it. Machine: desktop, Ryzen 7 5800X3D, Windows 11, Docker Desktop
 with the WSL2 backend. Date 2026-10-31. Compiler for the C++ build: GCC 16.2.0
 in the Wolfi image, release mode.
 
@@ -36,57 +39,80 @@ All four are in process timings, so no container start is included.
 
 ## 200000 rows
 
+Run of 2026-10-31 10:52, samples in `bench/results/latest.json`.
+
 ### ipc lane
 
 | Impl | Wire bytes | Encode ms | Decode ms |
 |---|---|---|---|
-| cpp | 12670881 | 1.306 [1.097..1.480] | 1.399 [1.277..1.582] |
-| python | 12670845 | 19.272 [18.771..19.640] | 3.436 [3.296..3.855] |
-| rust | 12671117 | 1.883 [1.785..1.987] | 2.741 [2.739..2.831] |
-| zig | 12670849 | 43.930 [42.961..45.679] | 26.259 [26.017..27.067] |
+| cpp | 12670881 | 1.847 [1.550..2.187] | 1.786 [1.400..2.163] |
+| python | 12670845 | 22.859 [22.052..22.893] | 3.580 [3.399..4.958] |
+| rust | 12671117 | 1.926 [1.755..2.252] | 2.844 [2.807..2.868] |
+| zig | 12670849 | 45.428 [45.219..45.429] | 27.501 [26.166..28.196] |
 
 ### json lane
 
 | Impl | Wire bytes | Encode ms | Decode ms |
 |---|---|---|---|
-| cpp | 42505784 | 420.511 [419.206..427.057] | 590.546 [550.509..593.088] |
-| python | 42505756 | 2149.249 [2057.714..2247.899] | 2052.513 [1973.270..2079.816] |
-| rust | 42505812 | 262.011 [248.045..272.111] | 1204.029 [1174.650..1237.234] |
-| zig | 42372426 | 180.133 [177.324..185.798] | 339.865 [329.518..348.563] |
+| cpp | 42505784 | 246.668 [243.798..254.676] | 589.337 [586.845..592.738] |
+| python | 42505756 | 2290.481 [2249.773..2300.864] | 2157.549 [2103.980..2171.663] |
+| rust | 42505812 | 267.012 [252.902..272.253] | 1171.603 [1164.418..1234.781] |
+| zig | 42372426 | 190.893 [190.671..193.992] | 351.893 [335.849..356.158] |
 
 ### ipc-zstd lane
 
 | Impl | Wire bytes | Encode ms | Decode ms |
 |---|---|---|---|
-| cpp | 1608747 | 28.107 [25.894..31.658] | 9.475 [9.116..10.684] |
-| python | 1620041 | 27.977 [26.209..30.320] | 20.001 [19.142..21.079] |
-| rust | 1625309 | 30.646 [26.199..31.082] | 11.486 [10.736..12.402] |
-| zig | 1620045 | 62.386 [60.291..66.337] | 20.964 [20.697..23.807] |
+| cpp | 1608747 | 29.806 [28.912..30.943] | 10.257 [9.393..11.923] |
+| python | 1620041 | 32.119 [29.884..32.818] | 22.097 [21.200..24.189] |
+| rust | 1625309 | 28.465 [27.107..30.457] | 11.165 [10.728..12.033] |
+| zig | 1620045 | 64.609 [63.422..66.830] | 22.682 [22.590..24.746] |
 
 On the zstd lane this implementation has the smallest wire frame and the fastest
-decode by 2 ms. Encode is a three way tie that the data cannot separate: C++
-28.107, Python 27.977, Rust 30.646, with ranges that overlap. It is not a scored
-row in the win table, which is why none of it is claimed as a win.
+decode, 10.257 against Rust's 11.165. Encode is not the fastest: Rust takes 4.5
+percent less time, and Python takes 7.8 percent more. It is not a scored row, so
+none of it is claimed as a win.
 
 ## Win conditions
 
-| Condition | C++ | Reference | Limit | Verdict |
+Ratios are C++ divided by the reference, per round. A win needs the high end of
+the ratio range under the threshold.
+
+| Condition | Ratio | Threshold | C++ | Reference | Verdict |
+|---|---|---|---|---|---|
+| ipc encode | 1.052 [0.688..1.136] | 0.90 | 1.847 | rust 1.926 | UNDETERMINED |
+| ipc decode | 0.636 [0.488..0.761] | 0.80 | 1.786 | rust 2.844 | WIN |
+| json encode | 0.110 [0.106..0.111] | 1.10 | 246.668 | python 2290.481 | WIN |
+| json decode | 0.504 [0.477..0.506] | 0.60 | 589.337 | rust 1171.603 | WIN |
+| ipc wire bytes | 1.000 [1.000..1.000] | 1.02 | 12670881 | python 12670845 | WIN |
+
+Four wins, one undetermined, no losses.
+
+## Undetermined: ipc encode
+
+This row is not settled and is not claimed. Two runs measured it two ways:
+
+| Run | Repeats | Ratio per round | Median | Verdict |
 |---|---|---|---|---|
-| ipc encode | 1.306 | rust 1.883 | 1.695 | WIN |
-| ipc decode | 1.399 | rust 2.741 | 2.193 | WIN |
-| json encode | 420.511 | python 2149.249 | 2364.174 | WIN |
-| json decode | 590.546 | rust 1204.029 | 722.417 | WIN |
-| ipc wire bytes | 12670881 | python 12670845 | 12924262 | WIN |
+| four way, 09:35 | 7 | 1.136, 0.688, 1.052 | 1.052 | undetermined |
+| focused, 10:32 | 25 | 1.090, 0.835, 0.687 | 0.835 | undetermined |
 
-Five wins, no losses, and no row is undetermined: no C++ range overlaps the
-reference range it is measured against. The narrowest margin is ipc encode,
-where the C++ high of 1.480 sits below the Rust low of 1.785.
+Across six rounds the ratio spans 0.687 to 1.136. In one round C++ takes 31
+percent less time than Rust, in another it takes 14 percent more. The threshold
+is 0.90, and the data straddles it.
 
-The reference numbers move between runs because the machine does: Rust's ipc
-encode measured 1.387 ms in one run, 2.656 ms in another and 1.883 ms here. That
-is why the harness runs three interleaved rounds and reports ranges. A single
-run cannot decide a row whose margin is smaller than the spread, and the
-`UNDETERMINED` verdict exists for exactly that case. It did not trigger here.
+An earlier run reported this row as a win at 1.306 against 1.883. That reading
+came from comparing two unpaired ranges, which threw away the fact that both
+sides were measured in the same round. The corrected method does not support the
+claim, so the claim is withdrawn.
+
+What would settle it: a quiet machine with the benchmark pinned to dedicated
+cores, or enough rounds that the ratio's spread narrows under 0.90. Neither is
+available on this desktop, where the WSL2 backend shares the CPU with Windows.
+
+The likely cause is that 1.5 ms is a short measurement: the ipc lane takes about
+2 ms end to end, so one scheduler interruption during a repeat moves the median.
+The json lane, at 250 to 2000 ms, averages the same interruptions out.
 
 ## Losses
 
@@ -101,15 +127,12 @@ Every missed target, with the number and the open task behind it.
    unproven, not won.
 3. **Peak RSS at 500000 rows, not measured for all four.** Same reason. The C++
    number is taken from the operating system in `bench --json`.
-4. **json allocations, 163731 for 1000 rows against a target of 5000.** Down
-   from 309673, with byte identical output, but not at the target. The rest is
-   inside the value formatters: a `JsonValue` and a `std::string` per value,
-   with decimal formatting the largest contributor. Open task: formatters that
-   write into a caller buffer.
 
-The ipc encode loss closed on 2026-10-31. It stood at 1.540 ms against a
-1.424 ms limit, and the eight stream VPCLMULQDQ kernel took it to 1.306 ms
-against a 1.695 ms limit in the next run.
+Two targets closed on 2026-10-31. The json allocation target went from 163,731
+to 209 allocations for 1000 rows against a target of 5,000, with the 606 byte
+golden payload unchanged. The ipc encode row moved from 6.996 ms to between 1.3
+and 1.9 ms after the checksum, the body placement and the in place wire write,
+which turned it from a code question into a measurement question.
 
 ## Allocation budgets
 
@@ -118,15 +141,17 @@ pins the measured values.
 
 | Case | Allocations | Bytes |
 |---|---|---|
-| json encode, 1000 rows | 163731 | 5362161 |
+| json encode, 1000 rows | 209 | 735153 |
 | ipc encode, 1000 rows | 366 | 80730 |
 | ipc view decode, 63001 byte payload | 285 | 14856 |
 | ipc owning decode, 63001 byte payload | 291 | 139430 |
 
-Two things to read from that table. The view decode allocates 14,856 bytes for
+Three things to read from that table. The view decode allocates 14,856 bytes for
 a 63,001 byte payload, so it copies no payload, which is the zero copy claim
-proven rather than asserted. And ipc encode allocates one payload plus 18 KB,
-down from 141,993 bytes, because the body is written straight into the wire.
+proven rather than asserted. ipc encode allocates one payload plus 18 KB, down
+from 141,993 bytes, because the body is written straight into the wire. And json
+encode allocates 209 times for 1000 rows, down from 163,731, because every value
+is appended into the payload instead of being built as an object first.
 
 ## Binary size
 
@@ -141,12 +166,12 @@ statically.
 ## What is not claimed
 
 Nothing here says this is the fastest implementation overall. It is fastest on
-ipc encode, ipc decode and zstd decode, second on json decode, and third on
-json encode, where Zig is 2.3 times quicker and Rust 1.6 times. zstd encode is a
-tie the data cannot separate.
+ipc decode and zstd decode, ahead of Rust on both ipc medians, and behind Zig on
+both json rows: 1.29 times on encode, 1.67 times on decode. The ipc encode row is
+undetermined and is not counted.
 
-The json lane is the honest weak point: it beats Python by 5 times and loses to
-Zig by 2.3 times on the same fixture. `bench/compare.py --check` exits 0 on all
-five conditions, which is a statement about those five rows on this machine, not
-about every workload.
+The json lane is the weak point against Zig and the strongest row against Python,
+where the ratio is 0.110, that is 9 times faster. `bench/compare.py --check`
+exits 1 while the ipc encode row is undetermined, and that is the correct state
+of the work.
 
