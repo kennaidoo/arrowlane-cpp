@@ -49,6 +49,12 @@ add_library(arrowlane_core STATIC ${AL_CORE_SOURCES})
 if(MSVC)
   set_source_files_properties(src/crc32_vpclmul.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
 endif()
+# The ARMv8 checksum calls __crc32d and __crc32b, which GCC and Clang refuse to
+# inline unless the crc extension is enabled for that translation unit. The file
+# boundary is the guard, as it is for the AVX2 file above.
+if(NOT MSVC AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+  set_source_files_properties(src/crc32_arm.cpp PROPERTIES COMPILE_OPTIONS "-march=armv8-a+crc")
+endif()
 # The C ABI ships as a shared library, and a shared object cannot link a static
 # archive that was compiled without position independent code. MSVC ignores
 # this property; GCC and Clang need it.
