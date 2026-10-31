@@ -125,7 +125,8 @@ if(AL_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.cpp")
     add_executable(${test_name} "${test_source}")
     target_link_libraries(${test_name} PRIVATE al_test_main)
     target_compile_definitions(${test_name} PRIVATE
-      AL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures")
+      AL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures"
+      AL_DICT_OUT="${CMAKE_CURRENT_BINARY_DIR}/dict_cpp.arrows")
     add_test(NAME ${test_name} COMMAND ${test_name})
     # Every test runs in the build directory, so a test that writes a file
     # (dictionary_test writes the interop fixture) never touches the source

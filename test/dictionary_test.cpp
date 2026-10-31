@@ -66,9 +66,9 @@ AL_TEST(dictionary_batch_is_written_for_the_pyarrow_check) {
     auto stream = arrowlane::encode_ipc(batch);
     AL_REQUIRE(stream.has_value());
 
-    // ctest runs in the build directory, so this lands next to the test binary
-    // and works with a read only source mount in the container.
-    const std::string path = "dict_cpp.arrows";
+    // An absolute path from CMake, so the test does not depend on the working
+    // directory, which is read only inside the container.
+    const std::string path = AL_DICT_OUT;
     std::ofstream out(path, std::ios::binary);
     AL_REQUIRE(out.good());
     out.write(reinterpret_cast<const char*>(stream->data()),
