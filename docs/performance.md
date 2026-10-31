@@ -39,7 +39,7 @@ All four are in process timings, so no container start is included.
 
 ## 200000 rows
 
-Run of 2026-10-31 10:52, recorded in `bench/results/latest.md`. Only a full
+Run of 2026-10-31 09:55, recorded in `bench/results/latest.md`. Only a full
 record run writes that file; a smaller run writes `scratch-<stamp>.md` instead.
 
 ### ipc lane
@@ -95,8 +95,8 @@ This row is not settled and is not claimed. Two runs measured it two ways:
 
 | Run | Repeats | Ratio per round | Median | Verdict |
 |---|---|---|---|---|
-| four way, 09:35 | 7 | 1.136, 0.688, 1.052 | 1.052 | undetermined |
-| focused, 10:32 | 25 | 1.090, 0.835, 0.687 | 0.835 | undetermined |
+| four way, 09:55 | 7 | 1.136, 0.688, 1.052 | 1.052 | undetermined |
+| focused rerun | 25 | 1.090, 0.835, 0.687 | 0.835 | undetermined |
 
 Across six rounds the ratio spans 0.687 to 1.136. In one round C++ takes 31
 percent less time than Rust, in another it takes 14 percent more. The threshold
