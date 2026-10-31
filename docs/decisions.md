@@ -23,6 +23,10 @@ against Rust, is undetermined on this machine; `docs/performance.md` records it
 with three runs and an interval. That is a limit of measurement precision, not a
 code defect, so it does not block publication.
 
+Published 2026-10-31 at https://github.com/kennaidoo/arrowlane-cpp. The first
+public run of the ci workflow passed both jobs: linux in 59 seconds, windows in
+1 minute 31 seconds.
+
 Reverse if the comparison work needs public review before the release.
 
 ## D2 Version numbering: 0.1.0 until a published release
