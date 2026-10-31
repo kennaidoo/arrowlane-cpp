@@ -31,8 +31,9 @@ What works today:
 
 Every claim above is covered by a test that runs on two compilers, and the
 interop checks compare values, schema and digests against the reference in both
-directions. The rows that are not proven are listed in `docs/performance.md`
-under Losses, with their numbers.
+directions. The one row short of its condition, and the one row that measures a builder
+choice rather than the codec, are listed in `docs/performance.md` with their
+numbers.
 
 ## Build
 
@@ -110,7 +111,7 @@ python bench/compare.py --rows 200000 --repeats 7 --rounds 3 --check
 
 Every row reports a median with a range, and the verdict is taken on the ratio
 per round, so a machine that changes speed mid-run cannot turn a tie into a win.
-The current record, including the one row that is not settled, is in
+The current record, including the one loss and the one informational row, is in
 `docs/performance.md`.
 
 ## Layout

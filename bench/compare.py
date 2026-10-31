@@ -65,8 +65,10 @@ CONDITIONS = (
      "field": ENCODE},
     {"name": "json_decode_ms", "reference": "rust", "ratio": 0.6, "lane": "json",
      "field": DECODE},
+    # Not competitive: D6 measured the data to be identical, so this row compares
+    # the flatbuffer builder's layout. It stays as a blow up detector.
     {"name": "ipc_wire_bytes", "reference": "python", "ratio": 1.02, "lane": "ipc",
-     "field": WIRE},
+     "field": WIRE, "competitive": False},
 )
 
 VERDICT_RANK = {"LOSS": 0, "UNDETERMINED": 1, "INFO": 1, "WIN": 2}
@@ -224,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     lines: list[str] = []
     losses: list[str] = []
     undetermined: list[str] = []
+    informational: list[str] = []
     verdicts: dict[str, str] = {}
     for condition in CONDITIONS:
         name = condition["name"]
@@ -249,7 +252,10 @@ def main(argv: list[str] | None = None) -> int:
         ratio_median, ratio_low, ratio_high = summarise(ratios)
         ci_low, ci_high = bootstrap_median_ci(ratios)
         threshold = condition["ratio"]
-        if ratio_high <= threshold:
+        competitive = condition.get("competitive", True)
+        if not competitive:
+            verdict = "INFO"
+        elif ratio_high <= threshold:
             verdict = "WIN "
         elif ratio_low > threshold:
             verdict = "LOSS"
@@ -259,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
             undetermined.append(name)
         if verdict == "LOSS":
             losses.append(name)
+        if verdict == "INFO":
+            informational.append(name)
         verdicts[name] = verdict.strip()
 
         def show(number: float) -> str:
@@ -275,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
             f"cpp={show(cpp_median)} [{show(cpp_low)}..{show(cpp_high)}]  "
             f"{reference}={show(ref_median)} [{show(ref_low)}..{show(ref_high)}]  "
             f"others: {others}"
+            f"{'' if competitive else '  (builder layout, see D6)'}"
         )
         lines.append(line)
         print(line, flush=True)
@@ -329,6 +338,13 @@ def main(argv: list[str] | None = None) -> int:
         ]
     if losses:
         report += [f"Missed: {', '.join(losses)}.", ""]
+    if informational:
+        report += [
+            f"Informational: {', '.join(informational)}. These rows measure a "
+            "builder choice rather than a codec property, so they are counted as "
+            "neither a win nor a loss.",
+            "",
+        ]
     elif not undetermined:
         report += ["ALL WIN CONDITIONS MET", ""]
     report += [

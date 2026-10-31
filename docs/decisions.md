@@ -143,6 +143,10 @@ The consequence for the benchmark: `wire_bytes` is not a like for like compariso
 across implementations, because it includes metadata whose size is a builder
 choice. Read the wire column as a size estimate, not as a byte identity claim.
 
+The row therefore prints `INFO` and counts as neither a win nor a loss. Its 1.02
+threshold is not a target: it is a blow up detector, so that a change which grows
+the metadata past two percent fails the run instead of passing unnoticed.
+
 Reverse if a consumer needs hash equality on whole frames, in which case the target
 is pyarrow's exact layout and the check in `interop/check_bytes.py` becomes the
 acceptance test.

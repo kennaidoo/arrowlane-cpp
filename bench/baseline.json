@@ -4,6 +4,6 @@
     "ipc_decode_ms": "WIN",
     "json_encode_ms": "WIN",
     "json_decode_ms": "WIN",
-    "ipc_wire_bytes": "WIN"
+    "ipc_wire_bytes": "INFO"
   }
 }

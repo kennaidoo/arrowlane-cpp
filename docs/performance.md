@@ -85,9 +85,11 @@ the ratio range under the threshold.
 | ipc decode | 0.636 [0.488..0.761] | 0.80 | 1.786 | rust 2.844 | WIN |
 | json encode | 0.110 [0.106..0.111] | 1.10 | 246.668 | python 2290.481 | WIN |
 | json decode | 0.504 [0.477..0.506] | 0.60 | 589.337 | rust 1171.603 | WIN |
-| ipc wire bytes | 1.000 [1.000..1.000] | 1.02 | 12670881 | python 12670845 | WIN |
+| ipc wire bytes | 1.000 [1.000..1.000] | 1.02 | 12670881 | python 12670845 | INFO (D6) |
 
-Four wins, no undetermined rows, one loss. The ipc encode row was settled on
+Three wins, no undetermined rows, one loss, one informational row. The
+informational row measures the flatbuffer builder's layout, not the codec, and
+D6 records why. The ipc encode row was settled on
 arm64: 0.975 [0.928..0.992] against a 0.90 threshold, a 2.5 percent advantage
 where the condition asks for 10.
 
