@@ -303,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         "| Implementation | Method |",
         "|---|---|",
     ]
-    for impl in IMPLS:
+    for impl in chosen:
         report.append(f"| {impl} | {METHOD[impl]} |")
     report += [
         "",
@@ -360,7 +360,10 @@ def main(argv: list[str] | None = None) -> int:
         "| Impl | Image bytes |",
         "|---|---|",
     ]
-    for impl in IMPLS:
+    # Only the implementations this run measured. Inspecting all four made a
+    # focused run fail when an image had never been built, which is how the arm64
+    # job broke as soon as the step stopped tolerating failure.
+    for impl in chosen:
         report.append(f"| {impl} | {image_size(impl)} |")
     report.append("")
 
