@@ -42,6 +42,13 @@ list(REMOVE_ITEM AL_CORE_SOURCES
 list(APPEND AL_CORE_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/generated/costmodel_data.cpp")
 
 add_library(arrowlane_core STATIC ${AL_CORE_SOURCES})
+
+# One translation unit is compiled for AVX2: the eight stream checksum. MSVC has
+# no per function target attribute, so the file boundary is the guard. Nothing
+# in it runs until crc32_have_vpclmul() returns true.
+if(MSVC)
+  set_source_files_properties(src/crc32_vpclmul.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
+endif()
 # The C ABI ships as a shared library, and a shared object cannot link a static
 # archive that was compiled without position independent code. MSVC ignores
 # this property; GCC and Clang need it.

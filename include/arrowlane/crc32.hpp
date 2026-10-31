@@ -19,4 +19,13 @@ namespace arrowlane {
 // True when this CPU reports PCLMULQDQ, SSSE3 and SSE4.1 on leaf 1.
 [[nodiscard]] bool crc32_have_pclmul() noexcept;
 
+// Eight stream path over 256 bit carry-less multiplies. Returns exactly what
+// crc32_table returns, on any CPU: when the instructions, the operating system
+// state or the length are missing it falls back to crc32_pclmul.
+[[nodiscard]] std::uint32_t crc32_wide(std::span<const std::byte> bytes) noexcept;
+
+// True when this CPU reports AVX2 and VPCLMULQDQ on leaf 7 and the operating
+// system has enabled the YMM state.
+[[nodiscard]] bool crc32_have_vpclmul() noexcept;
+
 }  // namespace arrowlane

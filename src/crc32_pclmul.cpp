@@ -1,5 +1,7 @@
 #include "arrowlane/crc32.hpp"
 
+#include "detail/crc32_x86.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -121,6 +123,15 @@ AL_PCLMUL_TARGET std::uint32_t crc32_sse(const std::uint8_t* data,
 }
 
 }  // namespace
+
+namespace detail {
+
+std::uint32_t crc32_finish_128(__m128i x, const std::uint8_t* data,
+                               std::size_t size) noexcept {
+    return reduce_to_crc(x, data, size);
+}
+
+}  // namespace detail
 
 #endif  // AL_HAVE_X86_64
 

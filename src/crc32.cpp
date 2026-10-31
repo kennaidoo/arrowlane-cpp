@@ -49,7 +49,11 @@ std::uint32_t crc32_table(std::span<const std::byte> bytes) noexcept {
 }
 
 std::uint32_t crc32(std::span<const std::byte> bytes) noexcept {
+    // Two independent checks, each resolved once. The wide kernel needs AVX2
+    // and the operating system state; the narrow one needs PCLMULQDQ only.
+    static const bool wide = crc32_have_vpclmul();
     static const bool hardware = crc32_have_pclmul();
+    if (wide && bytes.size() >= 256) return crc32_wide(bytes);
     if (hardware && bytes.size() >= 16) return crc32_pclmul(bytes);
     return crc32_table(bytes);
 }
