@@ -72,6 +72,14 @@ echo "== check_dictionary =="
 "$BUILD/dictionary_test"
 "${PYTHON:-python3}" /src/interop/check_dictionary.py --path "$BUILD/dict_cpp.arrows"
 
+echo "== check_bytes =="
+# One table, both implementations, compared. The json payload must be identical to
+# the byte; the ipc data must match buffer for buffer, while the flatbuffer layout
+# of the metadata is allowed to differ.
+ARROWLANE_SRC=/arrowlane/src ARROWLANE_BENCH=/arrowlane/bench/containers \
+  "${PYTHON:-python3}" /src/interop/check_bytes.py --exe "$BUILD/arrowlane-cpp" \
+  --rows 200000
+
 echo "== check_cabi =="
 # The library is built with ASan, so a plain Python process cannot dlopen it.
 # Preload the runtime; leak detection stays off because Python is not

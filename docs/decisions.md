@@ -110,3 +110,31 @@ optimisation of this lane is authorised on the strength of this row alone.
 Reverse if a quiet machine with dedicated cores, or a second architecture,
 produces a ratio whose interval excludes 0.90 in either direction. The arm64
 benchmark job added for that reason is the first such attempt.
+
+## D6 Byte identity: the data matches, the flatbuffer layout does not
+
+Measured 2026-10-31 by feeding one table to both implementations through the CLI
+and comparing the output:
+
+| Part | Result |
+|---|---|
+| json payload, 200000 rows | identical, 42504990 bytes on both sides |
+| ipc schema | equal as a schema |
+| ipc data buffers | identical, 18 of 18, byte for byte |
+| ipc schema message | python 472 bytes, this port 488 |
+| ipc record batch metadata | python 504 bytes, this port 496 |
+| frame header carrying the schema | differs, which is the 28 byte wire gap |
+
+Reason: the two build the same flatbuffer with different padding, field order and
+vtable placement, and pyarrow additionally writes its own version marker. Matching
+that byte for byte would mean reproducing another library's builder decisions,
+which buys nothing: every reader in the comparison decodes both streams to the same
+tables, and the payload the user sees in the json lane is identical.
+
+The consequence for the benchmark: `wire_bytes` is not a like for like comparison
+across implementations, because it includes metadata whose size is a builder
+choice. Read the wire column as a size estimate, not as a byte identity claim.
+
+Reverse if a consumer needs hash equality on whole frames, in which case the target
+is pyarrow's exact layout and the check in `interop/check_bytes.py` becomes the
+acceptance test.
