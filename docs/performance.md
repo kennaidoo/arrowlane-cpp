@@ -117,6 +117,9 @@ What would settle it: a quiet machine with the benchmark pinned to dedicated
 cores, or enough rounds that the ratio's spread narrows under 0.90. Neither is
 available on this desktop, where the WSL2 backend shares the CPU with Windows.
 
+The decision is D5 in `docs/decisions.md`: the row stays undetermined, it is not
+a loss, and no further work on this lane is authorised on the strength of it.
+
 The likely cause is that 1.5 ms is a short measurement: the ipc lane takes about
 2 ms end to end, so one scheduler interruption during a repeat moves the median.
 The json lane, at 250 to 2000 ms, averages the same interruptions out.

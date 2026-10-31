@@ -91,3 +91,22 @@ optimisation.
 
 Reverse if a shared zstd or a library only build is wanted for a specific
 deployment, in which case the target returns with a stated configuration.
+
+## D5 ipc encode: recorded undetermined, not a loss
+
+The paired ratio for ipc encode has been measured three times, over fifteen
+rounds, and every reading straddles the 0.90 threshold: 1.052 [0.688..1.136]
+over three rounds, 0.835 [0.687..1.090] over three focused rounds, and 0.835
+[0.403..1.064] over nine rounds pinned to two cores. Seven of the nine pinned
+rounds are under the threshold, and the 95 percent bootstrap interval for the
+median is 0.812 to 1.038, so the threshold is not excluded.
+
+Reason: a row that cannot be called a win must not be called a win, and it must
+not be called a loss either. The lane takes about 2 ms end to end, so one
+scheduler interruption during a repeat moves the median, and this desktop shares
+its CPU between Windows and the WSL2 backend that runs the benchmark. No further
+optimisation of this lane is authorised on the strength of this row alone.
+
+Reverse if a quiet machine with dedicated cores, or a second architecture,
+produces a ratio whose interval excludes 0.90 in either direction. The arm64
+benchmark job added for that reason is the first such attempt.
