@@ -9,8 +9,14 @@ the Python driver already print it, because this is the protocol the reference
 repository uses.
 
 Usage:
-    python bench/compare.py --rows 200000 --repeats 7
-    python bench/compare.py --rows 200000 --repeats 7 --check
+    python bench/compare.py --rows 200000 --repeats 7 --rounds 3
+    python bench/compare.py --rows 200000 --repeats 7 --rounds 3 --check
+
+The harness measures in interleaved rounds: every implementation is measured
+inside the same round, so a thermal or load change hits all four together. Each
+row reports a median and the range across rounds. When the C++ range and the
+reference range overlap, the row prints as UNDETERMINED rather than pretending
+a single run settled it.
 """
 
 from __future__ import annotations
@@ -38,10 +44,10 @@ IMAGES = {
 # Everything except the Python image takes a subcommand.
 PREFIX = {"cpp": ["bench"], "python": [], "rust": ["bench"], "zig": ["bench"]}
 METHOD = {
-    "cpp": "in process, encode and frame, mean of the repeats",
-    "python": "in process, pack and unpack, mean of the repeats",
-    "rust": "in process, mean of the repeats",
-    "zig": "in process, mean of the repeats",
+    "cpp": "in process, lane encode plus frame, median of the repeats",
+    "python": "in process, pack then unpack, median of the repeats",
+    "rust": "in process, median of the repeats",
+    "zig": "in process, median of the repeats",
 }
 
 # Field positions into the (wire, enc, dec) tuple.
@@ -63,6 +69,24 @@ CONDITIONS = (
 )
 
 DOCKER = shutil.which("docker")
+
+Samples = dict[str, dict[str, list[tuple[int, float, float]]]]
+
+
+def summarise(samples: list[float]) -> tuple[float, float, float]:
+    """Median, low and high of the per round samples."""
+    ordered = sorted(samples)
+    return statistics.median(ordered), ordered[0], ordered[-1]
+
+
+def field_samples(samples: Samples, impl: str, lane: str, field: int) -> list[float]:
+    # Each round contributes one (wire, enc, dec) tuple for this lane.
+    return [sample[field] for sample in samples[impl][lane]]
+
+
+def ranges_overlap(left: tuple[float, float, float],
+                   right: tuple[float, float, float]) -> bool:
+    return not (left[2] < right[1] or right[2] < left[1])
 
 
 def run(argv: list[str]) -> str:
@@ -112,46 +136,67 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rows", type=int, default=200_000)
     parser.add_argument("--repeats", type=int, default=7)
+    parser.add_argument("--rounds", type=int, default=3,
+                        help="interleaved rounds; each round measures every impl")
     parser.add_argument("--check", action="store_true",
                         help="exit 1 when a win condition is missed")
     parser.add_argument("--build", action="store_true",
                         help="rebuild the C++ image first")
     args = parser.parse_args(argv)
-    if args.rows < 1 or args.repeats < 1:
-        parser.error("rows and repeats must be positive")
+    if args.rows < 1 or args.repeats < 1 or args.rounds < 1:
+        parser.error("rows, repeats and rounds must be positive")
     if DOCKER is None:
         raise SystemExit("error: docker is not on PATH")
 
     if args.build:
         build_cpp_image()
 
-    results: dict[str, dict[str, tuple[int, float, float]]] = {}
-    for impl in IMPLS:
-        print(f"measuring {impl}", flush=True)
-        measure(impl, args.rows, 1)  # warmup, discarded
-        results[impl] = measure(impl, args.rows, args.repeats)
+    samples: Samples = {impl: {lane: [] for lane in LANES} for impl in IMPLS}
+    for round_index in range(args.rounds):
+        for impl in IMPLS:
+            print(f"round {round_index + 1}/{args.rounds}: {impl}", flush=True)
+            measure(impl, args.rows, 1)  # warmup, discarded
+            round_result = measure(impl, args.rows, args.repeats)
+            for lane in LANES:
+                samples[impl][lane].append(round_result[lane])
 
     lines: list[str] = []
     losses: list[str] = []
+    undetermined: list[str] = []
     for condition in CONDITIONS:
         name = condition["name"]
         reference = condition["reference"]
         lane = condition["lane"]
         field = condition["field"]
-        value = results["cpp"][lane][field]
-        base = results[reference][lane][field]
-        limit = base * condition["ratio"]
-        verdict = "WIN " if value <= limit else "LOSS"
+
+        cpp_median, cpp_low, cpp_high = summarise(
+            field_samples(samples, "cpp", lane, field))
+        ref_median, ref_low, ref_high = summarise(
+            field_samples(samples, reference, lane, field))
+        limit = ref_median * condition["ratio"]
+        overlap = ranges_overlap((cpp_median, cpp_low, cpp_high),
+                                 (ref_median, ref_low, ref_high))
+
+        verdict = "WIN " if cpp_median <= limit else "LOSS"
+        if overlap:
+            verdict = "UNDETERMINED"
+            undetermined.append(name)
         if verdict == "LOSS":
             losses.append(name)
 
-        def show(number) -> str:
+        def show(number: float) -> str:
             return f"{number:.0f}" if field == WIRE else f"{number:.3f}"
 
-        others = " ".join(f"{impl}={show(results[impl][lane][field])}"
-                          for impl in IMPLS if impl not in ("cpp", reference))
-        line = (f"{verdict} {name:<16} cpp={show(value):<10} "
-                f"{reference}={show(base):<10} limit={show(limit):<10} others: {others}")
+        others = " ".join(
+            f"{impl}={show(summarise(field_samples(samples, impl, lane, field))[0])}"
+            for impl in IMPLS if impl not in ("cpp", reference))
+        line = (
+            f"{verdict:<13} {name:<16} "
+            f"cpp={show(cpp_median)} [{show(cpp_low)}..{show(cpp_high)}]  "
+            f"{reference}={show(ref_median)} [{show(ref_low)}..{show(ref_high)}]  "
+            f"limit={show(limit)}  overlap={'yes' if overlap else 'no'}  "
+            f"others: {others}"
+        )
         lines.append(line)
         print(line, flush=True)
 
@@ -161,8 +206,9 @@ def main(argv: list[str] | None = None) -> int:
         "",
         f"Run {stamp} on {platform.platform()} with "
         f"{platform.processor() or 'unknown cpu'}.",
-        f"Rows {args.rows}, repeats {args.repeats}, one lane at a time, "
-        "each implementation in its own container.",
+        f"Rows {args.rows}, repeats {args.repeats}, rounds {args.rounds}, "
+        "implementations interleaved inside each round, each in its own "
+        "container.",
         "",
         "## Method",
         "",
@@ -178,19 +224,32 @@ def main(argv: list[str] | None = None) -> int:
         "",
         "## Lane metrics",
         "",
+        "Median of the rounds, with the range in brackets.",
+        "",
         "| Lane | Impl | Wire bytes | Encode ms | Decode ms |",
         "|---|---|---|---|---|",
     ]
     for lane in LANES:
         for impl in IMPLS:
-            wire, enc, dec = results[impl][lane]
-            report.append(f"| {lane} | {impl} | {wire} | {enc:.3f} | {dec:.3f} |")
+            wire = samples[impl][lane][0][WIRE]
+            enc = summarise(field_samples(samples, impl, lane, ENCODE))
+            dec = summarise(field_samples(samples, impl, lane, DECODE))
+            report.append(
+                f"| {lane} | {impl} | {wire} | "
+                f"{enc[0]:.3f} [{enc[1]:.3f}..{enc[2]:.3f}] | "
+                f"{dec[0]:.3f} [{dec[1]:.3f}..{dec[2]:.3f}] |")
     report += ["", "## Win conditions", "", "```"]
     report += lines
     report += ["```", ""]
+    if undetermined:
+        report += [
+            f"Undetermined: {', '.join(undetermined)}. The C++ range and the "
+            "reference range overlap, so no single run settles these rows.",
+            "",
+        ]
     if losses:
         report += [f"Missed: {', '.join(losses)}.", ""]
-    else:
+    elif not undetermined:
         report += ["ALL WIN CONDITIONS MET", ""]
     report += [
         "## Not measured by this harness",
@@ -212,14 +271,21 @@ def main(argv: list[str] | None = None) -> int:
     RESULTS.mkdir(parents=True, exist_ok=True)
     (RESULTS / "latest.md").write_text("\n".join(report), encoding="utf-8")
     (RESULTS / "latest.json").write_text(
-        json.dumps({impl: {lane: list(values) for lane, values in lanes.items()}
-                    for impl, lanes in results.items()}, indent=2),
+        json.dumps(
+            {impl: {lane: [list(sample) for sample in samples[impl][lane]]
+                    for lane in LANES}
+             for impl in IMPLS},
+            indent=2,
+        ),
         encoding="utf-8",
     )
     print(f"wrote {RESULTS / 'latest.md'}")
 
     if args.check and losses:
         print(f"MISSED: {', '.join(losses)}")
+        return 1
+    if args.check and undetermined:
+        print(f"UNDETERMINED: {', '.join(undetermined)}")
         return 1
     if args.check:
         print("ALL WIN CONDITIONS MET")
