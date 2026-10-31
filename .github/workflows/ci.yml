@@ -44,6 +44,9 @@ jobs:
         run: cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      # The baseline gate is Python, so its unit cases run beside the C++ tests.
+      - name: Bench harness tests
+        run: python3 bench/tests/test_baseline.py
       # The strongest interop claim in this repo, on every push instead of only on
       # the desk. It installs the Python reference and compares one table encoded by
       # both implementations: the json payload to the byte, and every ipc data

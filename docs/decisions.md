@@ -119,6 +119,11 @@ withdrawn, and this port is 2.5 percent faster than the Rust reference where the
 condition asks for 10. No further work on this lane is authorised on the strength
 of the row, because the row is now a known loss rather than an open question.
 
+A second run of the same job produced 0.905 [0.896..0.928], which straddles the
+threshold and prints UNDETERMINED. The label moves between runs. The failure does
+not: the condition asks for the high end of the interval to clear 0.90, and it has
+not in either reading.
+
 ## D6 Byte identity: the data matches, the flatbuffer layout does not
 
 Measured 2026-10-31 by feeding one table to both implementations through the CLI

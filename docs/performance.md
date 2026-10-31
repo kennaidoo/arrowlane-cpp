@@ -112,6 +112,13 @@ own stated condition. This port is 2.5 percent faster than the Rust reference on
 ipc encode, where the condition asks for 10 percent. The x86 history below stays as
 the record of why the row was parked.
 
+A second run of the same job, twenty minutes later, put the interval at 0.896 to
+0.928 with a ratio of 0.905, which straddles the threshold and prints
+UNDETERMINED. Both readings agree on the only thing the condition asks, which is
+whether the high end clears 0.90, and neither does. The row stays recorded as a
+loss: the condition is not met on this architecture, and the label moves with the
+runner rather than with the code.
+
 This row is not settled and is not claimed. Three runs measured it three ways:
 
 | Run | Repeats | Rounds | Median ratio | Range | Verdict |
