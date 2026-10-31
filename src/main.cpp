@@ -118,7 +118,7 @@ int usage() {
                  "                          [--json]\n"
                  "  arrowlane-cpp describe [--compact]\n"
                  "  arrowlane-cpp bench [--rows N] [--repeats N] [--json]\n"
-                 "  arrowlane-cpp pack --lane L [--rows N | --in FILE] --out FILE\n"
+                 "  arrowlane-cpp pack --lane L [--rows N | --in FILE | --dictionary] --out FILE\n"
                  "                          [--chunks] [--rows-per-chunk N]\n"
                  "  arrowlane-cpp unpack FILE [--json | --chunks]\n"
                  "  arrowlane-cpp debug-schema one|fixture|types\n"
@@ -148,7 +148,8 @@ std::vector<std::byte> read_file(const char* path) {
 }
 
 int pack_command(const char* lane_text, std::int64_t rows, const char* out_path,
-                 const char* in_path, bool chunks, std::int64_t rows_per_chunk) {
+                 const char* in_path, bool chunks, std::int64_t rows_per_chunk,
+                 bool dictionary) {
     const auto lane = arrowlane::lane_id_from_name(lane_text);
     if (!lane) {
         std::fprintf(stderr, "error: UnknownLane: no lane named %s\n", lane_text);
@@ -164,6 +165,8 @@ int pack_command(const char* lane_text, std::int64_t rows, const char* out_path,
         auto decoded = arrowlane::decode_ipc(stream);
         if (!decoded) return fail(decoded.error());
         batch = std::move(*decoded);
+    } else if (dictionary) {
+        batch = arrowlane::make_dictionary_fixture();
     } else {
         batch = arrowlane::make_fixture(rows);
     }
@@ -660,10 +663,15 @@ int main(int argc, char** argv) {
         std::int64_t rows_per_chunk =
             static_cast<std::int64_t>(arrowlane::kDefaultChunkRows);
         bool chunks = false;
+        bool dictionary = false;
         for (int index = 2; index < argc; ++index) {
             const std::string_view flag = argv[index];
             if (flag == "--chunks") {
                 chunks = true;
+                continue;
+            }
+            if (flag == "--dictionary") {
+                dictionary = true;
                 continue;
             }
             if (index + 1 >= argc) return usage();
@@ -676,7 +684,8 @@ int main(int argc, char** argv) {
             else return usage();
         }
         if (!lane || !out_path) return usage();
-        return pack_command(lane, rows, out_path, in_path, chunks, rows_per_chunk);
+        return pack_command(lane, rows, out_path, in_path, chunks, rows_per_chunk,
+                            dictionary);
     }
     if (argc >= 3 && std::strcmp(argv[1], "unpack") == 0) {
         // Flags may come before or after the path.

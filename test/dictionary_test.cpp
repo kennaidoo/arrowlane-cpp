@@ -1,6 +1,7 @@
 #include "harness.hpp"
 
 #include "arrowlane/column.hpp"
+#include "arrowlane/fixture.hpp"
 #include "arrowlane/ipc.hpp"
 #include "arrowlane/lanes.hpp"
 #include "arrowlane/schema.hpp"
@@ -14,35 +15,10 @@
 
 namespace {
 
-// One field, three rows, two dictionary values: the smallest batch that proves
-// the whole path.
+// The fixture now lives in the library, so the CLI packs the same bytes the test
+// checks.
 arrowlane::RecordBatch make_dictionary_batch() {
-    arrowlane::Schema schema;
-    arrowlane::Field field;
-    field.name = "merchant";
-    field.type = arrowlane::Type::utf8();
-    field.dictionary = arrowlane::DictionaryEncoding{0, 4, false};
-    schema.fields.push_back(field);
-
-    arrowlane::ColumnBuilder indices(arrowlane::Type::integer(32, true));
-    indices.append_int(0);
-    indices.append_int(1);
-    indices.append_int(0);
-
-    arrowlane::ColumnBuilder values(arrowlane::Type::utf8());
-    const std::string first = "ozow";
-    const std::string second = "payfast";
-    values.append_bytes(
-        {reinterpret_cast<const std::byte*>(first.data()), first.size()});
-    values.append_bytes(
-        {reinterpret_cast<const std::byte*>(second.data()), second.size()});
-
-    arrowlane::RecordBatch batch;
-    batch.schema = schema;
-    batch.columns.push_back(indices.finish());
-    batch.dictionaries.push_back(
-        arrowlane::DictionaryColumn{0, arrowlane::Type::utf8(), values.finish()});
-    return batch;
+    return arrowlane::make_dictionary_fixture();
 }
 
 }  // namespace

@@ -14,6 +14,35 @@ const std::array<std::byte, 3> kBlob{std::byte{0}, std::byte{1}, std::byte{2}};
 
 }  // namespace
 
+RecordBatch make_dictionary_fixture() {
+    Schema schema;
+    Field field;
+    field.name = "merchant";
+    field.type = Type::utf8();
+    field.dictionary = DictionaryEncoding{0, 4, false};
+    schema.fields.push_back(field);
+
+    ColumnBuilder indices(Type::integer(32, true));
+    indices.append_int(0);
+    indices.append_int(1);
+    indices.append_int(0);
+
+    ColumnBuilder values(Type::utf8());
+    const std::string first = "ozow";
+    const std::string second = "payfast";
+    values.append_bytes(
+        {reinterpret_cast<const std::byte*>(first.data()), first.size()});
+    values.append_bytes(
+        {reinterpret_cast<const std::byte*>(second.data()), second.size()});
+
+    RecordBatch batch;
+    batch.schema = schema;
+    batch.columns.push_back(indices.finish());
+    batch.dictionaries.push_back(
+        DictionaryColumn{0, Type::utf8(), values.finish()});
+    return batch;
+}
+
 RecordBatch make_fixture(std::int64_t rows) {
     RecordBatch batch;
     Schema schema;
