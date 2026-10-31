@@ -57,8 +57,8 @@ AL_TEST(schema_validation) {
 
 AL_TEST(schema_equality) {
     arrowlane::Schema left;
-    left.fields.push_back(arrowlane::Field{"id", arrowlane::Type::integer(64, true), true});
-    left.fields.push_back(arrowlane::Field{"name", arrowlane::Type::utf8(), true});
+    left.fields.push_back(arrowlane::Field{"id", arrowlane::Type::integer(64, true), true, std::nullopt});
+    left.fields.push_back(arrowlane::Field{"name", arrowlane::Type::utf8(), true, std::nullopt});
     arrowlane::Schema right = left;
     AL_CHECK(left == right);
     right.fields[1].nullable = false;
@@ -70,7 +70,7 @@ AL_TEST(schema_equality) {
 
 AL_TEST(schema_message_frames_the_bytes) {
     arrowlane::Schema schema;
-    schema.fields.push_back(arrowlane::Field{"id", arrowlane::Type::integer(64, true), true});
+    schema.fields.push_back(arrowlane::Field{"id", arrowlane::Type::integer(64, true), true, std::nullopt});
     auto message = arrowlane::encode_schema_message(schema);
     AL_REQUIRE(message.has_value());
     AL_CHECK_EQ(static_cast<std::uint8_t>((*message)[0]), std::uint8_t{0xFF});
@@ -83,16 +83,16 @@ AL_TEST(schema_message_frames_the_bytes) {
 
 AL_TEST(schema_message_type_tables) {
     arrowlane::Schema schema;
-    schema.fields.push_back(arrowlane::Field{"d32", arrowlane::Type::date(0), true});
-    schema.fields.push_back(arrowlane::Field{"d64", arrowlane::Type::date(1), true});
-    schema.fields.push_back(arrowlane::Field{"t64", arrowlane::Type::time(3, 64), true});
+    schema.fields.push_back(arrowlane::Field{"d32", arrowlane::Type::date(0), true, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"d64", arrowlane::Type::date(1), true, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"t64", arrowlane::Type::time(3, 64), true, std::nullopt});
     schema.fields.push_back(
-        arrowlane::Field{"ts", arrowlane::Type::timestamp(2, "UTC"), true});
+        arrowlane::Field{"ts", arrowlane::Type::timestamp(2, "UTC"), true, std::nullopt});
     schema.fields.push_back(
-        arrowlane::Field{"dec", arrowlane::Type::decimal(9, 2, 128), true});
+        arrowlane::Field{"dec", arrowlane::Type::decimal(9, 2, 128), true, std::nullopt});
     schema.fields.push_back(
-        arrowlane::Field{"fsb", arrowlane::Type::fixed_size_binary(3), true});
-    schema.fields.push_back(arrowlane::Field{"u8", arrowlane::Type::integer(8, false), true});
+        arrowlane::Field{"fsb", arrowlane::Type::fixed_size_binary(3), true, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"u8", arrowlane::Type::integer(8, false), true, std::nullopt});
     auto message = arrowlane::encode_schema_message(schema);
     AL_REQUIRE(message.has_value());
     auto decoded = arrowlane::decode_schema_message(*message);
@@ -102,7 +102,7 @@ AL_TEST(schema_message_type_tables) {
 
 AL_TEST(schema_base64_roundtrip) {
     arrowlane::Schema schema;
-    schema.fields.push_back(arrowlane::Field{"ts", arrowlane::Type::timestamp(0), true});
+    schema.fields.push_back(arrowlane::Field{"ts", arrowlane::Type::timestamp(0), true, std::nullopt});
     auto text = arrowlane::schema_base64(schema);
     AL_REQUIRE(text.has_value());
     auto decoded = arrowlane::schema_from_base64(*text);

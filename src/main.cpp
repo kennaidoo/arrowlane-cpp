@@ -34,37 +34,37 @@ namespace {
 
 arrowlane::Schema one_schema() {
     arrowlane::Schema schema;
-    schema.fields.push_back(arrowlane::Field{"a", arrowlane::Type::integer(64, true), false});
+    schema.fields.push_back(arrowlane::Field{"a", arrowlane::Type::integer(64, true), false, std::nullopt});
     return schema;
 }
 
 arrowlane::Schema fixture_schema() {
     arrowlane::Schema schema;
-    schema.fields.push_back(arrowlane::Field{"id", arrowlane::Type::integer(64, true), true});
-    schema.fields.push_back(arrowlane::Field{"name", arrowlane::Type::utf8(), true});
-    schema.fields.push_back(arrowlane::Field{"score", arrowlane::Type::floating(64), true});
-    schema.fields.push_back(arrowlane::Field{"ok", arrowlane::Type::boolean(), true});
-    schema.fields.push_back(arrowlane::Field{"day", arrowlane::Type::date(0), true});
+    schema.fields.push_back(arrowlane::Field{"id", arrowlane::Type::integer(64, true), true, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"name", arrowlane::Type::utf8(), true, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"score", arrowlane::Type::floating(64), true, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"ok", arrowlane::Type::boolean(), true, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"day", arrowlane::Type::date(0), true, std::nullopt});
     schema.fields.push_back(
-        arrowlane::Field{"amount", arrowlane::Type::decimal(9, 2, 128), true});
+        arrowlane::Field{"amount", arrowlane::Type::decimal(9, 2, 128), true, std::nullopt});
     schema.fields.push_back(
-        arrowlane::Field{"ts", arrowlane::Type::timestamp(2, "UTC"), true});
-    schema.fields.push_back(arrowlane::Field{"blob", arrowlane::Type::binary(), true});
+        arrowlane::Field{"ts", arrowlane::Type::timestamp(2, "UTC"), true, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"blob", arrowlane::Type::binary(), true, std::nullopt});
     return schema;
 }
 
 arrowlane::Schema types_schema() {
     arrowlane::Schema schema;
-    schema.fields.push_back(arrowlane::Field{"n", arrowlane::Type::null(), true});
-    schema.fields.push_back(arrowlane::Field{"lb", arrowlane::Type::large_binary(), false});
-    schema.fields.push_back(arrowlane::Field{"lu", arrowlane::Type::large_utf8(), false});
-    schema.fields.push_back(arrowlane::Field{"u32", arrowlane::Type::integer(32, false), false});
-    schema.fields.push_back(arrowlane::Field{"f16", arrowlane::Type::floating(16), false});
-    schema.fields.push_back(arrowlane::Field{"d64", arrowlane::Type::date(1), false});
-    schema.fields.push_back(arrowlane::Field{"t32", arrowlane::Type::time(1, 32), false});
-    schema.fields.push_back(arrowlane::Field{"t64", arrowlane::Type::time(3, 64), false});
-    schema.fields.push_back(arrowlane::Field{"ts", arrowlane::Type::timestamp(0), false});
-    schema.fields.push_back(arrowlane::Field{"dur", arrowlane::Type::duration(1), false});
+    schema.fields.push_back(arrowlane::Field{"n", arrowlane::Type::null(), true, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"lb", arrowlane::Type::large_binary(), false, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"lu", arrowlane::Type::large_utf8(), false, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"u32", arrowlane::Type::integer(32, false), false, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"f16", arrowlane::Type::floating(16), false, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"d64", arrowlane::Type::date(1), false, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"t32", arrowlane::Type::time(1, 32), false, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"t64", arrowlane::Type::time(3, 64), false, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"ts", arrowlane::Type::timestamp(0), false, std::nullopt});
+    schema.fields.push_back(arrowlane::Field{"dur", arrowlane::Type::duration(1), false, std::nullopt});
     return schema;
 }
 

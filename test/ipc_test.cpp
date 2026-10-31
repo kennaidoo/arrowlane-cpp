@@ -24,8 +24,8 @@ namespace {
 arrowlane::RecordBatch make_two_column_batch() {
     using namespace arrowlane;
     RecordBatch batch;
-    batch.schema.fields.push_back(Field{"id", Type::integer(64, true), true});
-    batch.schema.fields.push_back(Field{"name", Type::utf8(), true});
+    batch.schema.fields.push_back(Field{"id", Type::integer(64, true), true, std::nullopt});
+    batch.schema.fields.push_back(Field{"name", Type::utf8(), true, std::nullopt});
 
     ColumnBuilder id(Type::integer(64, true));
     id.append_int(1);
@@ -190,7 +190,7 @@ AL_TEST(ipc_lane_rejects_a_header_schema_mismatch) {
     auto frame = encode_lane(LaneId::Ipc, make_fixture(3));
     AL_REQUIRE(frame.has_value());
     Schema other;
-    other.fields.push_back(Field{"only", Type::integer(64, true), true});
+    other.fields.push_back(Field{"only", Type::integer(64, true), true, std::nullopt});
     auto message = encode_schema_message(other);
     AL_REQUIRE(message.has_value());
     frame->header.set("schema", JsonValue(base64_encode(*message)));

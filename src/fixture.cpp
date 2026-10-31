@@ -17,14 +17,14 @@ const std::array<std::byte, 3> kBlob{std::byte{0}, std::byte{1}, std::byte{2}};
 RecordBatch make_fixture(std::int64_t rows) {
     RecordBatch batch;
     Schema schema;
-    schema.fields.push_back(Field{"id", Type::integer(64, true), true});
-    schema.fields.push_back(Field{"name", Type::utf8(), true});
-    schema.fields.push_back(Field{"score", Type::floating(64), true});
-    schema.fields.push_back(Field{"ok", Type::boolean(), true});
-    schema.fields.push_back(Field{"day", Type::date(0), true});
-    schema.fields.push_back(Field{"amount", Type::decimal(9, 2, 128), true});
-    schema.fields.push_back(Field{"ts", Type::timestamp(2, "UTC"), true});
-    schema.fields.push_back(Field{"blob", Type::binary(), true});
+    schema.fields.push_back(Field{"id", Type::integer(64, true), true, std::nullopt});
+    schema.fields.push_back(Field{"name", Type::utf8(), true, std::nullopt});
+    schema.fields.push_back(Field{"score", Type::floating(64), true, std::nullopt});
+    schema.fields.push_back(Field{"ok", Type::boolean(), true, std::nullopt});
+    schema.fields.push_back(Field{"day", Type::date(0), true, std::nullopt});
+    schema.fields.push_back(Field{"amount", Type::decimal(9, 2, 128), true, std::nullopt});
+    schema.fields.push_back(Field{"ts", Type::timestamp(2, "UTC"), true, std::nullopt});
+    schema.fields.push_back(Field{"blob", Type::binary(), true, std::nullopt});
     batch.schema = std::move(schema);
 
     ColumnBuilder id(Type::integer(64, true));
