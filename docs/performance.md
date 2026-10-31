@@ -174,30 +174,39 @@ which turned it from a code question into a measurement question.
 
 ## Where the ipc encode time goes
 
-Measured 2026-10-31 on the desk, 200000 rows, separate probes built with the same
-MSVC 14.51 Release toolchain:
+Measured 2026-10-31 on the desk, 200000 rows. The two paths are timed inside one
+process, alternating, so the machine's mood cancels and the number is a paired
+ratio. Twelve pairs, and the arena served exactly one allocation per encode:
+
+| Reading | Value |
+|---|---|
+| ipc encode, payload allocated fresh on every call | 3.41 to 3.87 ms |
+| ipc encode, payload served from a pre-touched arena | 1.50 to 1.69 ms |
+| paired ratio, arena over allocating | 0.437 to 0.450 |
+
+So more than half of the Windows encode is first touch faults on the 12.67 MB
+payload allocation: about 2.0 ms of 3.5 ms. A caller that keeps one buffer removes
+that cost.
+
+Component probes with the same toolchain, measured separately:
 
 | Step | Time |
 |---|---|
 | copy 12670881 bytes into a buffer that is already resident | 0.51 ms |
 | allocate a fresh 12670881 byte buffer and touch every page | 1.31 ms |
-| allocate, touch, then copy | 1.90 ms |
-| the whole ipc encode, 20 repeats | 3.42 ms |
 
-So the row is not copy bound. About a third of the cost is first touch faults on a
-fresh allocation, and the rest is work other than the copy: the checksum, the
-flatbuffer metadata and the per column assembly.
+The component probe understated the effect, and this document said a third of the
+cost was first touch. That was wrong: the encoder allocates more than once on its
+way to the final size, and measuring one allocation in isolation misses the rest.
+The paired measurement is the one to trust.
 
-The same source built with GCC 16 in the container reaches 1.02 ms on this machine
-at 7 repeats and 1.61 ms at 20, while the json encode agrees between the two builds
-(244.7 ms here, 246.7 ms in the container). The difference is therefore specific to
-the ipc path, and the first touch cost is the largest single candidate: Linux backs
-a 12.67 MB mapping with huge pages, where Windows faults the same range 3093 times.
+The same source built with GCC 16 in the container reaches 1.02 ms on this machine,
+which is close to the arena number less the smaller allocations it still pays. The
+Linux path therefore already avoids most of this cost.
 
-Nothing was changed on the strength of this. Reusing the payload buffer would
-remove the first touch cost, but a frame owns its payload, so that is a contract
-change and needs its own test cycle. The loss recorded in D5 stands: 0.975 and 0.905
-on arm64 are both short of 0.90.
+Nothing was changed on the strength of it. Reusing the payload is a contract change
+and needs its own test cycle. The loss recorded in D5 stands: 0.975 and 0.905 on
+arm64 are both short of 0.90.
 
 ## Measured and reverted
 
