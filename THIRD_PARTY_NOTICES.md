@@ -2,11 +2,12 @@
 
 ## crc32fast 1.5.3
 
-The PCLMULQDQ checksum in `src/crc32_pclmul.cpp` is a port of
-`src/specialized/pclmulqdq.rs` from the crc32fast crate, version 1.5.3, which is
-licensed MIT OR Apache-2.0. The algorithm follows the Intel white paper "Fast
-CRC computation for generic polynomials using PCLMULQDQ instruction" and zlib's
-implementation of it. The constants are unchanged from the crate.
+The PCLMULQDQ checksum in `src/crc32_pclmul.cpp` and the eight stream variant in
+`src/crc32_vpclmul.cpp` are ports of `src/specialized/pclmulqdq.rs` from the
+crc32fast crate, version 1.5.3, which is licensed MIT OR Apache-2.0. The
+algorithm follows the Intel white paper "Fast CRC computation for generic
+polynomials using PCLMULQDQ instruction" and zlib's implementation of it. The
+constants, including the 1024 bit fold pair, are unchanged from the crate.
 
 ## zstd 1.5.7
 

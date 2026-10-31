@@ -27,11 +27,12 @@ What works today:
 | lane selector from a measured cost model | complete, 388 parity cases |
 | chunk streams with backpressure | complete |
 | C ABI for foreign bindings | complete |
-| benchmarks against Python, Rust and Zig | not yet run |
+| benchmarks against Python, Rust and Zig | complete, see `docs/performance.md` |
 
-Do not read the word alpha as a warning about correctness. Every claim above is
-covered by a test that runs on two compilers, and the interop checks compare
-values, schema and digests against the reference in both directions.
+Every claim above is covered by a test that runs on two compilers, and the
+interop checks compare values, schema and digests against the reference in both
+directions. The rows that are not proven are listed in `docs/performance.md`
+under Losses, with their numbers.
 
 ## Build
 
@@ -65,8 +66,9 @@ docker build -f tools/Dockerfile.test -t arrowlane-cpp-test:wolfi .
 tools\run-tests.cmd
 ```
 
-That runs `ctest`, the fuzz harness, and five cross-language checks: wire
-values, selector parity, chunk streams, the C ABI, and the manifest.
+That runs `ctest`, the fuzz harness, and six cross-language checks: wire
+values, wire fuzzing, selector parity, chunk streams, the C ABI, and the schema
+message.
 
 ## Lanes
 
@@ -92,6 +94,20 @@ A frame that carries one of these is rejected with a clear error rather than
 read incorrectly. Decimal256 is carried by the frame and the IPC lane but not
 by the json lane.
 
+## Benchmarks
+
+The four way comparison runs each implementation in its own container against
+the same fixture:
+
+```bash
+python bench/compare.py --rows 200000 --repeats 7 --rounds 3 --check
+```
+
+Every row reports a median with a range, and the verdict is taken on the ratio
+per round, so a machine that changes speed mid-run cannot turn a tie into a win.
+The current record, including the one row that is not settled, is in
+`docs/performance.md`.
+
 ## Layout
 
 ```text
@@ -103,6 +119,6 @@ tools/               container image, zstd fetch, feature probes
 docs/                decisions, feature matrix, agent docs
 ```
 
-## Licence
+## License
 
 Apache 2.0. See `LICENSE`.
