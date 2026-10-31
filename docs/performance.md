@@ -237,6 +237,28 @@ The loss recorded in D5 stands: 0.975 and 0.905 on arm64 are both short of 0.90,
 because the comparison runs in containers where the allocation cost is already
 absent.
 
+## The Zig build mode, measured 2026-10-31
+
+The Zig benchmark image is built with `-Doptimize=ReleaseSafe`, while this port is
+Release and Rust is built with `--release`. That is a different trade-off in the
+same table, so the image was rebuilt with `-Doptimize=ReleaseFast` and both were run
+interleaved at 200000 rows, five repeats, twice each:
+
+| Lane | ReleaseSafe | ReleaseFast |
+|---|---|---|
+| json encode | 175.1 and 176.2 ms | 145.0 and 152.0 ms |
+| ipc encode | 40.6 and 43.4 ms | 39.6 and 42.9 ms |
+| ipc decode | 23.9 and 25.1 ms | 24.4 and 25.9 ms |
+
+The safety checks are worth about 15 percent on the json encode, and nothing
+measurable on ipc. So the ipc gap against this port, roughly 40 ms against 1.85 ms,
+is not the build mode and not the compiler. It is the writer.
+
+For the record, this port is 21 to 24 times faster than the Zig implementation on
+ipc encode and about 1.2 times slower on json encode, and no condition in
+`bench/compare.py` uses Zig as a reference, so neither number is adjudicated by the
+verdict table.
+
 ## Measured and reverted
 
 An optimisation that does not move its number is recorded here, so the same work
