@@ -88,6 +88,8 @@ jobs:
           path: arrowlane-rust
       - name: Build the Rust benchmark image
         run: docker build -t arrowlane-bench-rust:local -f arrowlane-rust/bench/Dockerfile arrowlane-rust
+      # --check exits 1 on any condition that is not a win, and ipc encode is a
+      # known loss on this runner (D5). The step is a record, not a gate.
       - name: Paired ratio
         run: >
           python3 bench/compare.py --impls cpp,rust --rows 200000

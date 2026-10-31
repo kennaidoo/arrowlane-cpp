@@ -111,6 +111,14 @@ Reverse if a quiet machine with dedicated cores, or a second architecture,
 produces a ratio whose interval excludes 0.90 in either direction. The arm64
 benchmark job added for that reason is the first such attempt.
 
+Reversed 2026-10-31. The arm64 job measured it on `ubuntu-24.04-arm`: ratio 0.975
+with a 95 percent interval of 0.928 to 0.992, against the 0.90 threshold. The
+interval excludes 0.90 from above, so the row is a LOSS. C++ 1.653 ms against Rust
+1.696 ms, 200000 rows, seven repeats over three rounds. The undetermined verdict is
+withdrawn, and this port is 2.5 percent faster than the Rust reference where the
+condition asks for 10. No further work on this lane is authorised on the strength
+of the row, because the row is now a known loss rather than an open question.
+
 ## D6 Byte identity: the data matches, the flatbuffer layout does not
 
 Measured 2026-10-31 by feeding one table to both implementations through the CLI

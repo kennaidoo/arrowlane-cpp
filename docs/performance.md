@@ -81,15 +81,34 @@ the ratio range under the threshold.
 
 | Condition | Ratio | Threshold | C++ | Reference | Verdict |
 |---|---|---|---|---|---|
-| ipc encode | 1.052 [0.688..1.136] | 0.90 | 1.847 | rust 1.926 | UNDETERMINED |
+| ipc encode | 0.975 [0.928..0.992] | 0.90 | 1.653 | rust 1.696 | LOSS (arm64) |
 | ipc decode | 0.636 [0.488..0.761] | 0.80 | 1.786 | rust 2.844 | WIN |
 | json encode | 0.110 [0.106..0.111] | 1.10 | 246.668 | python 2290.481 | WIN |
 | json decode | 0.504 [0.477..0.506] | 0.60 | 589.337 | rust 1171.603 | WIN |
 | ipc wire bytes | 1.000 [1.000..1.000] | 1.02 | 12670881 | python 12670845 | WIN |
 
-Four wins, one undetermined, no losses.
+Four wins, no undetermined rows, one loss. The ipc encode row was settled on
+arm64: 0.975 [0.928..0.992] against a 0.90 threshold, a 2.5 percent advantage
+where the condition asks for 10.
 
-## Undetermined: ipc encode
+## ipc encode: undetermined on x86, a loss on arm64
+
+Settled 2026-10-31 on `ubuntu-24.04-arm`, the same runner that publishes the
+`bench-arm64` artifact. Seven repeats over three rounds, both implementations
+measured in the same round:
+
+| Reading | Value |
+|---|---|
+| ratio | 0.975 |
+| 95 percent interval | 0.928 to 0.992 |
+| threshold | 0.90 |
+| C++ | 1.653 ms [1.575..1.664] |
+| Rust | 1.696 ms [1.678..1.698] |
+
+The interval excludes 0.90 from above, so the row is a LOSS and D5 reverses on its
+own stated condition. This port is 2.5 percent faster than the Rust reference on
+ipc encode, where the condition asks for 10 percent. The x86 history below stays as
+the record of why the row was parked.
 
 This row is not settled and is not claimed. Three runs measured it three ways:
 
@@ -240,9 +259,9 @@ undetermined row stays undetermined.
 ## What is not claimed
 
 Nothing here says this is the fastest implementation overall. It is fastest on
-ipc decode and zstd decode, ahead of Rust on both ipc medians, and behind Zig on
+ipc decode and zstd decode, ahead of Rust on ipc decode, and behind Zig on
 both json rows: 1.29 times on encode, 1.67 times on decode. The ipc encode row is
-undetermined and is not counted.
+a loss on arm64, 0.975 against a 0.90 threshold.
 
 The json lane is the weak point against Zig and the strongest row against Python,
 where the ratio is 0.110, that is 9 times faster. `bench/compare.py --check`
