@@ -11,6 +11,11 @@
 #include <string_view>
 #include <vector>
 
+#if defined(__aarch64__) && defined(__linux__)
+#include <asm/hwcap.h>
+#include <sys/auxv.h>
+#endif
+
 namespace {
 std::span<const std::byte> as_bytes(std::string_view text) {
     return {reinterpret_cast<const std::byte*>(text.data()), text.size()};
@@ -146,4 +151,17 @@ AL_TEST(crc32_arm_matches_the_table) {
         }
     }
     AL_CHECK_EQ(mismatches, std::size_t{0});
+}
+
+AL_TEST(crc32_arm_guard_agrees_with_the_platform) {
+#if defined(__aarch64__) && defined(__linux__)
+    // The guard must be the kernel's HWCAP bit, not a constant, so that a build
+    // for a core without the extension cannot claim the instructions exist.
+    const bool expected = (getauxval(AT_HWCAP) & HWCAP_CRC32) != 0UL;
+    AL_CHECK(arrowlane::crc32_have_arm_crc32() == expected);
+#elif defined(__aarch64__)
+    AL_CHECK(arrowlane::crc32_have_arm_crc32());
+#else
+    AL_CHECK(!arrowlane::crc32_have_arm_crc32());
+#endif
 }

@@ -72,7 +72,7 @@ AL_WIDE_TARGET __m128i fold128(__m128i a, __m128i b, __m128i keys) noexcept {
 }
 
 // Requires size >= 256, which the caller checks.
-AL_WIDE_TARGET std::uint32_t crc32_wide_sse(const std::uint8_t* data,
+AL_WIDE_TARGET std::uint32_t crc32_wide_kernel(const std::uint8_t* data,
                                             std::size_t size) noexcept {
     __m256i v0 = load256(data);
     __m256i v1 = load256(data + 32);
@@ -148,7 +148,7 @@ std::uint32_t crc32_wide(std::span<const std::byte> bytes) noexcept {
     return crc32_table(bytes);
 #else
     if (bytes.size() < 256 || !crc32_have_vpclmul()) return crc32_pclmul(bytes);
-    return crc32_wide_sse(reinterpret_cast<const std::uint8_t*>(bytes.data()),
+    return crc32_wide_kernel(reinterpret_cast<const std::uint8_t*>(bytes.data()),
                           bytes.size());
 #endif
 }

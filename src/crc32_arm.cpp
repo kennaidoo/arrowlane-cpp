@@ -18,6 +18,10 @@
 #if defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
 #define AL_ARM_CRC 1
 #include <arm_acle.h>
+#if defined(__linux__)
+#include <asm/hwcap.h>
+#include <sys/auxv.h>
+#endif
 #else
 #define AL_ARM_CRC 0
 #endif
@@ -53,10 +57,14 @@ std::uint32_t crc32_arm_kernel(const std::uint8_t* data,
 bool crc32_have_arm_crc32() noexcept {
 #if !AL_ARM_CRC
     return false;
+#elif defined(__linux__)
+    // The kernel reports the feature; the build flag only decides whether this
+    // file may contain the instructions. Ask, do not assume.
+    static const bool available = (getauxval(AT_HWCAP) & HWCAP_CRC32) != 0UL;
+    return available;
 #else
-    // The instructions are baseline on every aarch64 core this project targets,
-    // so the compile time guard is the whole check. A build for a core without
-    // them must pass -mno+crc, which turns AL_ARM_CRC off.
+    // Apple silicon and the other aarch64 targets this project builds for have
+    // the instructions on every core.
     return true;
 #endif
 }
