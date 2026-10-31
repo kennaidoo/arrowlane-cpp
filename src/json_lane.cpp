@@ -175,10 +175,29 @@ void append_tag(std::string& out, const char* tag) {
 
 // Writes one value straight into the payload. No JsonValue and no std::string
 // per value: the payload is the only buffer.
-Result<void> append_value(std::string& out, const Type& type, const Column& column,
-                          std::int64_t row) {
+Result<void> append_value(std::string& out, const Field& field, const Column& column,
+                          std::int64_t row, const Column* values = nullptr) {
+    const Type& type = field.type;
     const std::size_t index = static_cast<std::size_t>(row);
     const std::size_t width = type.width();
+
+    // A dictionary field carries int32 indices. Recursing with values == nullptr
+    // disables this branch, so the recursion terminates on the values column.
+    if (field.dictionary && values != nullptr) {
+        if (row < 0 ||
+            index * field.dictionary->index_width + field.dictionary->index_width >
+                column.data.bytes().size()) {
+            return std::unexpected(
+                make_error(Code::Invalid, "dictionary index is missing"));
+        }
+        const auto raw_index = detail::load_le<std::int32_t>(
+            column.data.bytes().data() + index * field.dictionary->index_width);
+        if (raw_index < 0 || static_cast<std::int64_t>(raw_index) >= values->length) {
+            return std::unexpected(
+                make_error(Code::Invalid, "dictionary index is out of range"));
+        }
+        return append_value(out, field, *values, raw_index, nullptr);
+    }
     switch (type.kind) {
         case Type::Kind::Null:
             out += "null";
@@ -346,7 +365,20 @@ Result<std::string> encode_json_payload(const RecordBatch& batch) {
                 payload.append("null");
                 continue;
             }
-            auto appended = append_value(payload, field.type, column, row);
+            const Column* dictionary_values = nullptr;
+            if (field.dictionary) {
+                for (const DictionaryColumn& dictionary : batch.dictionaries) {
+                    if (dictionary.id == field.dictionary->id) {
+                        dictionary_values = &dictionary.values;
+                    }
+                }
+                if (dictionary_values == nullptr) {
+                    return std::unexpected(make_error(
+                        Code::Invalid, "column " + field.name + " has no dictionary"));
+                }
+            }
+            auto appended =
+                append_value(payload, field, column, row, dictionary_values);
             if (!appended) return std::unexpected(appended.error());
         }
         payload.push_back('}');

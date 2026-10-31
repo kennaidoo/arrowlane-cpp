@@ -64,6 +64,13 @@ ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_select.py \
 echo "== check_chunks =="
 ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_chunks.py     --exe "$BUILD/arrowlane-cpp"
 
+echo "== check_dictionary =="
+# Two directions: the C++ test writes a dictionary stream for pyarrow to read,
+# and it reads the stream pyarrow wrote.
+"${PYTHON:-python3}" /src/interop/make_dict_fixture.py
+"$BUILD/dictionary_test"
+"${PYTHON:-python3}" /src/interop/check_dictionary.py --path "$BUILD/dict_cpp.arrows"
+
 echo "== check_cabi =="
 # The library is built with ASan, so a plain Python process cannot dlopen it.
 # Preload the runtime; leak detection stays off because Python is not

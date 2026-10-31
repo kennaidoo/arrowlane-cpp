@@ -21,7 +21,9 @@ std::size_t expected_buffers(const Schema& schema) {
     std::size_t count = 0;
     for (const Field& field : schema.fields) {
         if (field.type.kind == Type::Kind::Null) continue;
-        count += field.type.is_variable_length() ? 3 : 2;
+        // A dictionary column holds int32 indices, so it has no offsets buffer
+        // even when the value type is variable length.
+        count += (field.dictionary || !field.type.is_variable_length()) ? 2 : 3;
     }
     return count;
 }
@@ -54,12 +56,13 @@ Result<IpcLayout> plan_ipc_body(const RecordBatch& batch) {
     std::uint64_t offset = 0;
     for (std::size_t index = 0; index < batch.columns.size(); ++index) {
         const Column& column = batch.columns[index];
-        const Type& type = batch.schema.fields[index].type;
+        const Field& field = batch.schema.fields[index];
+        const Type& type = field.type;
         layout.nodes.emplace_back(column.length, column.null_count);
         if (type.kind == Type::Kind::Null) continue;
         layout.buffers.push_back(IpcBuffer{offset, column.validity.size()});
         offset = align8(offset + column.validity.size());
-        if (type.is_variable_length()) {
+        if (!field.dictionary && type.is_variable_length()) {
             layout.buffers.push_back(IpcBuffer{offset, column.offsets.size()});
             offset = align8(offset + column.offsets.size());
         }
@@ -84,11 +87,12 @@ Result<void> place_ipc_body(const RecordBatch& batch, const IpcLayout& layout,
     std::size_t buffer = 0;
     for (std::size_t index = 0; index < batch.columns.size(); ++index) {
         const Column& column = batch.columns[index];
-        const Type& type = batch.schema.fields[index].type;
+        const Field& field = batch.schema.fields[index];
+        const Type& type = field.type;
         if (type.kind == Type::Kind::Null) continue;
         auto validity = place(body, layout.buffers[buffer++], column.validity.bytes());
         if (!validity) return std::unexpected(validity.error());
-        if (type.is_variable_length()) {
+        if (!field.dictionary && type.is_variable_length()) {
             auto offsets = place(body, layout.buffers[buffer++], column.offsets.bytes());
             if (!offsets) return std::unexpected(offsets.error());
         }
@@ -108,6 +112,40 @@ Result<std::vector<std::byte>> build_ipc_body(const RecordBatch& batch,
     return body;
 }
 
+// Writes the RecordBatch table with its node and buffer vectors and returns the
+// table position. Shared by the record batch and by every dictionary batch, so
+// both carry metadata of identical shape.
+std::size_t write_record_batch_metadata(detail::FlatWriter& writer,
+                                        const RecordBatch& batch,
+                                        const IpcLayout& layout) {
+    auto record = writer.begin_table(3);
+    writer.add_i64(record, 0, batch.rows());
+    const std::size_t nodes_field = writer.add_offset(record, 1);
+    const std::size_t buffers_field = writer.add_offset(record, 2);
+    writer.end_table(record);
+
+    auto nodes = writer.add_struct_vector(layout.nodes.size(), 16, 8);
+    for (std::size_t index = 0; index < layout.nodes.size(); ++index) {
+        std::array<std::byte, 16> raw{};
+        detail::store_le<std::int64_t>(raw.data(), layout.nodes[index].first);
+        detail::store_le<std::int64_t>(raw.data() + 8, layout.nodes[index].second);
+        writer.write_struct(nodes, index, raw);
+    }
+    writer.patch_offset(nodes_field, nodes.pos);
+
+    auto buffers = writer.add_struct_vector(layout.buffers.size(), 16, 8);
+    for (std::size_t index = 0; index < layout.buffers.size(); ++index) {
+        std::array<std::byte, 16> raw{};
+        detail::store_le<std::int64_t>(
+            raw.data(), static_cast<std::int64_t>(layout.buffers[index].offset));
+        detail::store_le<std::int64_t>(
+            raw.data() + 8, static_cast<std::int64_t>(layout.buffers[index].length));
+        writer.write_struct(buffers, index, raw);
+    }
+    writer.patch_offset(buffers_field, buffers.pos);
+    return record.pos;
+}
+
 Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch,
                                           std::size_t headroom) {
     auto schema_message = encode_schema_message(batch.schema);
@@ -115,7 +153,52 @@ Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch,
     auto layout = plan_ipc_body(batch);
     if (!layout) return std::unexpected(layout.error());
 
-    // The writer holds the two flatbuffer messages, a few hundred bytes each.
+    // The schema message first, then one dictionary batch per dictionary, then
+    // the record batch. Arrow requires each dictionary before the batch that
+    // indexes it. One buffer holds all of it.
+    std::vector<std::byte> out;
+    if (headroom == 0) {
+        out = std::move(*schema_message);
+    } else {
+        out.assign(headroom, std::byte{0});
+        out.insert(out.end(), schema_message->begin(), schema_message->end());
+    }
+
+    for (const DictionaryColumn& dictionary : batch.dictionaries) {
+        // A dictionary batch is a record batch with one column: the values.
+        RecordBatch values;
+        values.schema.fields.push_back(
+            Field{"dictionary_values", dictionary.value_type, false, std::nullopt});
+        values.columns.push_back(dictionary.values);
+        auto values_layout = plan_ipc_body(values);
+        if (!values_layout) return std::unexpected(values_layout.error());
+        auto values_body = build_ipc_body(values, *values_layout);
+        if (!values_body) return std::unexpected(values_body.error());
+
+        detail::FlatWriter writer(4096);
+        auto message = writer.begin_table(4);
+        writer.add_i16(message, 0, detail::kMessageVersionV5);
+        writer.add_u8(message, 1, detail::kMessageHeaderDictionaryBatch);
+        const std::size_t header_field = writer.add_offset(message, 2);
+        writer.add_i64(message, 3, values_layout->body_size);
+        writer.end_table(message);
+
+        auto batch_table = writer.begin_table(3);
+        writer.add_i64(batch_table, 0, dictionary.id);
+        const std::size_t data_field = writer.add_offset(batch_table, 1);
+        writer.add_bool(batch_table, 2, false);  // isDelta, never true here
+        writer.end_table(batch_table);
+
+        const std::size_t data_pos =
+            write_record_batch_metadata(writer, values, *values_layout);
+        writer.patch_offset(data_field, data_pos);
+        writer.patch_offset(header_field, batch_table.pos);
+
+        auto meta = detail::encapsulate(writer.finish(message.pos));
+        out.insert(out.end(), meta.begin(), meta.end());
+        out.insert(out.end(), values_body->begin(), values_body->end());
+    }
+
     detail::FlatWriter writer(4096);
     auto message = writer.begin_table(4);
     writer.add_i16(message, 0, detail::kMessageVersionV5);
@@ -124,42 +207,11 @@ Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch,
     writer.add_i64(message, 3, layout->body_size);
     writer.end_table(message);
 
-    auto record = writer.begin_table(3);
-    writer.add_i64(record, 0, batch.rows());
-    const std::size_t nodes_field = writer.add_offset(record, 1);
-    const std::size_t buffers_field = writer.add_offset(record, 2);
-    writer.end_table(record);
+    const std::size_t record_pos = write_record_batch_metadata(writer, batch, *layout);
+    writer.patch_offset(header_field, record_pos);
 
-    auto nodes = writer.add_struct_vector(layout->nodes.size(), 16, 8);
-    for (std::size_t index = 0; index < layout->nodes.size(); ++index) {
-        std::array<std::byte, 16> raw{};
-        detail::store_le<std::int64_t>(raw.data(), layout->nodes[index].first);
-        detail::store_le<std::int64_t>(raw.data() + 8, layout->nodes[index].second);
-        writer.write_struct(nodes, index, raw);
-    }
-    writer.patch_offset(nodes_field, nodes.pos);
-
-    auto buffers = writer.add_struct_vector(layout->buffers.size(), 16, 8);
-    for (std::size_t index = 0; index < layout->buffers.size(); ++index) {
-        std::array<std::byte, 16> raw{};
-        detail::store_le<std::int64_t>(raw.data(),
-                                       static_cast<std::int64_t>(layout->buffers[index].offset));
-        detail::store_le<std::int64_t>(raw.data() + 8,
-                                       static_cast<std::int64_t>(layout->buffers[index].length));
-        writer.write_struct(buffers, index, raw);
-    }
-    writer.patch_offset(buffers_field, buffers.pos);
-    writer.patch_offset(header_field, record.pos);
-
-    // One allocation for the whole frame. The body is placed into the region
-    // it will occupy in the wire, so nothing is copied twice.
-    std::vector<std::byte> out;
-    if (headroom == 0) {
-        out = std::move(*schema_message);
-    } else {
-        out.assign(headroom, std::byte{0});
-        out.insert(out.end(), schema_message->begin(), schema_message->end());
-    }
+    // One allocation for the whole frame. The body is placed into the region it
+    // will occupy in the wire, so nothing is copied twice.
     auto meta = detail::encapsulate(writer.finish(message.pos));
     const auto body_size = static_cast<std::size_t>(layout->body_size);
     const std::size_t body_start = out.size() + meta.size();
@@ -333,8 +385,9 @@ Column merge_columns(const Type& type, const std::vector<Column>& parts) {
     return merged;
 }
 
-Result<void> validate_column(const Column& column, const Type& type,
+Result<void> validate_column(const Column& column, const Field& field,
                              const std::string& name) {
+    const Type& type = field.type;
     if (column.length < 0 || column.null_count < 0 ||
         column.null_count > column.length) {
         return std::unexpected(make_error(
@@ -359,6 +412,18 @@ Result<void> validate_column(const Column& column, const Type& type,
         if (!column.data.empty()) {
             return std::unexpected(make_error(
                 Code::BadHeader, "null column " + name + " carries data"));
+        }
+        return {};
+    }
+    if (field.dictionary) {
+        if (!column.offsets.empty()) {
+            return std::unexpected(make_error(
+                Code::BadHeader, "column " + name + " carries offsets for an index column"));
+        }
+        const std::size_t index_bytes = static_cast<std::size_t>(column.length) * 4;
+        if (column.data.size() != index_bytes) {
+            return std::unexpected(make_error(
+                Code::BadHeader, "column " + name + " has the wrong index bytes"));
         }
         return {};
     }
@@ -468,7 +533,10 @@ Result<RecordBatch> decode_record_batch(
                 column.validity = std::move(*validity);
             }
             std::uint64_t data_needed = 0;
-            if (type.is_variable_length()) {
+            if (schema.fields[index].dictionary) {
+                // Index column: no offsets buffer, four bytes per row.
+                data_needed = static_cast<std::uint64_t>(column.length) * 4;
+            } else if (type.is_variable_length()) {
                 const auto offsets_needed =
                     static_cast<std::uint64_t>(column.length + 1) * type.offset_width();
                 auto offsets = take_buffer(reader, *buffers, buffer_index++, payload,
@@ -495,7 +563,7 @@ Result<RecordBatch> decode_record_batch(
             if (!data) return std::unexpected(data.error());
             column.data = std::move(*data);
         }
-        auto valid = validate_column(column, type, schema.fields[index].name);
+        auto valid = validate_column(column, schema.fields[index], schema.fields[index].name);
         if (!valid) return std::unexpected(valid.error());
         batch.columns.push_back(std::move(column));
     }
@@ -503,6 +571,88 @@ Result<RecordBatch> decode_record_batch(
 }
 
 }  // namespace
+
+// Decodes one DictionaryBatch message: the id at slot 0, isDelta at slot 2,
+// and the values in a record batch body of exactly one column.
+Result<DictionaryColumn> decode_dictionary_batch(
+    const Schema& schema, const detail::FlatReader& reader,
+    const detail::FlatReader::Table& table, std::span<const std::byte> payload,
+    const std::shared_ptr<const std::vector<std::byte>>& owner, std::size_t base) {
+    // flatbuffers omits a scalar equal to its default, and pyarrow writes id 0
+    // as absent rather than as a zero. Absent therefore means 0, not an error.
+    const std::int64_t id = reader.i64(table, 0).value_or(0);
+    if (const auto delta = reader.u8(table, 2); delta && *delta != 0) {
+        return std::unexpected(make_error(
+            Code::Unsupported, "delta dictionaries are not supported"));
+    }
+    const auto data_pos = reader.target(table, 1);
+    if (!data_pos) {
+        return std::unexpected(
+            make_error(Code::BadHeader, "dictionary batch carries no data"));
+    }
+    const auto data_table = reader.table_at(*data_pos);
+    if (!data_table) {
+        return std::unexpected(
+            make_error(Code::BadHeader, "dictionary data is not a table"));
+    }
+    const Field* encoded = nullptr;
+    for (const Field& field : schema.fields) {
+        if (field.dictionary && field.dictionary->id == id) {
+            encoded = &field;
+            break;
+        }
+    }
+    if (encoded == nullptr) {
+        return std::unexpected(
+            make_error(Code::BadHeader, "dictionary id is not in the schema"));
+    }
+    Schema values_schema;
+    values_schema.fields.push_back(
+        Field{"dictionary_values", encoded->type, false, std::nullopt});
+    auto values =
+        decode_record_batch(values_schema, reader, *data_table, payload, owner, base);
+    if (!values) return std::unexpected(values.error());
+    if (values->columns.size() != 1) {
+        return std::unexpected(make_error(
+            Code::BadHeader, "dictionary batch does not carry exactly one column"));
+    }
+    DictionaryColumn out;
+    out.id = id;
+    out.value_type = encoded->type;
+    out.values = std::move(values->columns[0]);
+    return out;
+}
+
+// Every index must point inside its dictionary, and every encoded field must
+// have one.
+Result<void> validate_dictionary_indices(const RecordBatch& batch) {
+    for (std::size_t index = 0; index < batch.columns.size(); ++index) {
+        const Field& field = batch.schema.fields[index];
+        if (!field.dictionary) continue;
+        const Column& column = batch.columns[index];
+        std::int64_t limit = -1;
+        for (const DictionaryColumn& dictionary : batch.dictionaries) {
+            if (dictionary.id == field.dictionary->id) {
+                limit = dictionary.values.length;
+            }
+        }
+        if (limit < 0) {
+            return std::unexpected(make_error(
+                Code::BadHeader, "column " + field.name + " has no dictionary"));
+        }
+        for (std::int64_t row = 0; row < column.length; ++row) {
+            if (!column.valid(row)) continue;
+            const auto value = detail::load_le<std::int32_t>(
+                column.data.bytes().data() + static_cast<std::size_t>(row) * 4);
+            if (value < 0 || value >= limit) {
+                return std::unexpected(make_error(
+                    Code::BadHeader,
+                    "column " + field.name + " has an index outside its dictionary"));
+            }
+        }
+    }
+    return {};
+}
 
 Result<RecordBatch> decode_ipc_view(
     std::span<const std::byte> stream, std::shared_ptr<const std::vector<std::byte>> owner,
@@ -525,6 +675,7 @@ Result<RecordBatch> decode_ipc_view(
 
     Schema schema;
     bool have_schema = false;
+    std::vector<DictionaryColumn> dictionaries;
     std::vector<RecordBatch> batches;
     std::size_t pos = 0;
     std::size_t messages = 0;
@@ -573,11 +724,16 @@ Result<RecordBatch> decode_ipc_view(
             return std::unexpected(
                 make_error(Code::BadHeader, "message header is not a table"));
         }
-        if (*tag == 2) {
-            return std::unexpected(make_error(
-                Code::Unsupported, "dictionary batches are not supported"));
-        }
-        if (*tag == detail::kMessageHeaderSchema) {
+        if (*tag == detail::kMessageHeaderDictionaryBatch) {
+            if (!have_schema) {
+                return std::unexpected(make_error(
+                    Code::BadHeader, "dictionary batch before the schema"));
+            }
+            auto dictionary = decode_dictionary_batch(
+                schema, reader, *table, payload, owner, base + header->body_start);
+            if (!dictionary) return std::unexpected(dictionary.error());
+            dictionaries.push_back(std::move(*dictionary));
+        } else if (*tag == detail::kMessageHeaderSchema) {
             std::vector<std::byte> encapsulated(8 + header->length, std::byte{0});
             detail::store_le<std::uint32_t>(encapsulated.data(), 0xFFFFFFFFU);
             detail::store_le<std::uint32_t>(encapsulated.data() + 4, header->length);
@@ -599,6 +755,9 @@ Result<RecordBatch> decode_ipc_view(
             auto batch = decode_record_batch(schema, reader, *table, payload, owner,
                                              base + header->body_start);
             if (!batch) return std::unexpected(batch.error());
+            batch->dictionaries = std::move(dictionaries);
+            auto indexed = validate_dictionary_indices(*batch);
+            if (!indexed) return std::unexpected(indexed.error());
             batches.push_back(std::move(*batch));
         } else {
             return std::unexpected(make_error(
@@ -625,6 +784,9 @@ Result<RecordBatch> decode_ipc_view(
 
     RecordBatch merged;
     merged.schema = std::move(schema);
+    // A stream carries one dictionary per id, so the first batch's set is the
+    // set for the whole stream. Replacement batches are rejected on read.
+    merged.dictionaries = batches.front().dictionaries;
     for (std::size_t index = 0; index < merged.schema.fields.size(); ++index) {
         std::vector<Column> parts;
         parts.reserve(batches.size());

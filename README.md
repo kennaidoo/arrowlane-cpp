@@ -88,11 +88,16 @@ or nanosecond units, and Duration.
 
 ## Not supported
 
-Nested types (List, LargeList, FixedSizeList, Struct, Map, Union), dictionary
-encoding, run end encoding, the Arrow view types, Float8, and interval types.
-A frame that carries one of these is rejected with a clear error rather than
-read incorrectly. Decimal256 is carried by the frame and the IPC lane but not
-by the json lane.
+Nested types (List, LargeList, FixedSizeList, Struct, Map, Union), run end
+encoding, the Arrow view types, Float8, and interval types. A frame that carries
+one of these is rejected with a clear error rather than read incorrectly.
+
+Dictionary encoding is supported for `utf8` and `binary` values with an `int32`
+index type, unordered, one dictionary per field. Ordered dictionaries, wider
+indices and replacement batches are rejected. The json lane renders the values,
+not the indices.
+
+Decimal256 is carried by the frame and the IPC lane but not by the json lane.
 
 ## Benchmarks
 

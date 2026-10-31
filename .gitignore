@@ -14,3 +14,4 @@ tools/feature_probe/*.log
 
 # Run logs
 *.log
+test/fixtures/dict_cpp.arrows
