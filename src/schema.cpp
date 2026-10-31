@@ -209,7 +209,7 @@ bool operator==(const Type& left, const Type& right) noexcept {
 
 bool operator==(const Field& left, const Field& right) noexcept {
     return left.name == right.name && left.type == right.type &&
-           left.nullable == right.nullable;
+           left.nullable == right.nullable && left.dictionary == right.dictionary;
 }
 
 bool operator==(const Schema& left, const Schema& right) noexcept {

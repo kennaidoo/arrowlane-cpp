@@ -225,6 +225,10 @@ Result<std::vector<std::byte>> encode_schema_message(const Schema& schema) {
         writer.add_bool(field_table, 1, field.nullable);
         writer.add_u8(field_table, 2, field.type.schema_tag());
         const std::size_t type_field = writer.add_offset(field_table, 3);
+        // Slot 4 is the dictionary encoding. It stays absent when the field is
+        // not encoded, so a plain schema encodes exactly as it did before.
+        const std::size_t dictionary_field =
+            field.dictionary ? writer.add_offset(field_table, 4) : 0;
         const std::size_t children_field = writer.add_offset(field_table, 5);
         writer.end_table(field_table);
 
@@ -234,6 +238,25 @@ Result<std::vector<std::byte>> encode_schema_message(const Schema& schema) {
         writer.patch_offset(type_field, type_pos);
         auto children = writer.add_offset_vector(0);
         writer.patch_offset(children_field, children.pos);
+        if (field.dictionary) {
+            auto dictionary_table = writer.begin_table(4);
+            writer.add_i64(dictionary_table, 0, field.dictionary->id);
+            const std::size_t index_type_field =
+                writer.add_offset(dictionary_table, 1);
+            writer.add_bool(dictionary_table, 2, field.dictionary->ordered);
+            writer.add_i16(dictionary_table, 3, 0);  // DictionaryKind: DenseArray
+            writer.end_table(dictionary_table);
+
+            // The index type is an ordinary Int table: bitWidth i32 at slot 0,
+            // is_signed bool at slot 1, exactly as write_type_table writes Int.
+            auto index_table = writer.begin_table(2);
+            writer.add_i32(index_table, 0, 32);
+            writer.add_bool(index_table, 1, true);
+            writer.end_table(index_table);
+
+            writer.patch_offset(index_type_field, index_table.pos);
+            writer.patch_offset(dictionary_field, dictionary_table.pos);
+        }
         writer.set_element(fields, index, field_table.pos);
     }
 
@@ -312,15 +335,44 @@ Result<Schema> decode_schema_message(std::span<const std::byte> bytes) {
         if (!type_tag) {
             return std::unexpected(bad_header("schema field carries no type tag"));
         }
+        std::optional<DictionaryEncoding> dictionary;
         if (reader.field(*field_table, 4)) {
-            return std::unexpected(make_error(
-                Code::Unsupported, "dictionary encoding is not supported"));
+            const auto dictionary_pos = reader.target(*field_table, 4);
+            if (!dictionary_pos) {
+                return std::unexpected(bad_header("dictionary offset is invalid"));
+            }
+            const auto dictionary_table = reader.table_at(*dictionary_pos);
+            if (!dictionary_table) {
+                return std::unexpected(bad_header("dictionary is not a table"));
+            }
+            DictionaryEncoding encoding;
+            encoding.id = reader.i64(*dictionary_table, 0).value_or(0);
+            encoding.ordered = reader.u8(*dictionary_table, 2).value_or(0) != 0;
+            std::int32_t bits = 32;
+            if (const auto index_pos = reader.target(*dictionary_table, 1)) {
+                const auto index_table = reader.table_at(*index_pos);
+                if (!index_table) {
+                    return std::unexpected(bad_header("dictionary index type is not a table"));
+                }
+                bits = reader.i32(*index_table, 0).value_or(32);
+            }
+            if (bits != 32) {
+                return std::unexpected(make_error(
+                    Code::Invalid, "dictionary index width must be 32 bits"));
+            }
+            if (encoding.ordered) {
+                return std::unexpected(make_error(
+                    Code::Invalid, "ordered dictionaries are not supported"));
+            }
+            encoding.index_width = 4;
+            dictionary = encoding;
         }
         auto type = read_type(reader, *field_table, *type_tag);
         if (!type) return std::unexpected(type.error());
         auto valid = validate_type(*type);
         if (!valid) return std::unexpected(valid.error());
-        schema.fields.push_back(Field{std::string(*name), std::move(*type), nullable});
+        schema.fields.push_back(
+            Field{std::string(*name), std::move(*type), nullable, dictionary});
     }
     return schema;
 }

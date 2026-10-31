@@ -22,9 +22,20 @@ struct Column {
     [[nodiscard]] std::span<const std::byte> bytes_at(std::int64_t row) const;
 };
 
+// One dictionary, carried beside the columns that index it. The values column is
+// an ordinary Column of the field value type, held here so the IPC writer does
+// not need a schema lookup to find it.
+struct DictionaryColumn {
+    std::int64_t id = 0;
+    Type value_type;
+    Column values;
+};
+
 struct RecordBatch {
     Schema schema;
     std::vector<Column> columns;
+    // Empty unless a field is dictionary encoded.
+    std::vector<DictionaryColumn> dictionaries;
 
     [[nodiscard]] std::int64_t rows() const noexcept;
 };

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -64,10 +65,25 @@ struct Type {
     [[nodiscard]] std::string name() const;
 };
 
+// Arrow models a dictionary as a property of the field, not as a type: the field
+// type is the value type, and the column carries indices into a dictionary
+// batch. This mirrors that, so a dictionary field and a plain field share the
+// same Type.
+struct DictionaryEncoding {
+    std::int64_t id = 0;
+    std::uint8_t index_width = 4;  // bytes. Only 4 is accepted in this phase.
+    bool ordered = false;          // must stay false; ordered is rejected.
+
+    [[nodiscard]] bool operator==(const DictionaryEncoding&) const noexcept = default;
+};
+
 struct Field {
     std::string name;
     Type type;
     bool nullable = true;
+    // nullopt when the column holds values, set when it holds dictionary
+    // indices. Defaulted, so every existing Field{a, b, c} still compiles.
+    std::optional<DictionaryEncoding> dictionary;
 };
 
 struct Schema {

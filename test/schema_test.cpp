@@ -141,3 +141,21 @@ AL_TEST(type_metadata_is_complete) {
     AL_CHECK(large_binary && *large_binary == Type::Kind::LargeBinary);
     AL_CHECK(!arrowlane::detail::kind_for_tag(12).has_value());
 }
+
+AL_TEST(dictionary_encoding_survives_the_schema_message) {
+    arrowlane::Schema schema;
+    arrowlane::Field field;
+    field.name = "merchant";
+    field.type = arrowlane::Type::utf8();
+    field.dictionary = arrowlane::DictionaryEncoding{3, 4, false};
+    schema.fields.push_back(field);
+
+    auto message = arrowlane::encode_schema_message(schema);
+    AL_REQUIRE(message.has_value());
+    auto parsed = arrowlane::decode_schema_message(*message);
+    AL_REQUIRE(parsed.has_value());
+    AL_CHECK(parsed->fields.size() == 1);
+    AL_REQUIRE(parsed->fields[0].dictionary.has_value());
+    AL_CHECK_EQ(parsed->fields[0].dictionary->id, std::int64_t{3});
+    AL_CHECK_EQ(parsed->fields[0].dictionary->index_width, std::uint8_t{4});
+}

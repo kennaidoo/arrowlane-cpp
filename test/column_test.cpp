@@ -146,3 +146,32 @@ AL_TEST(column_typed_views) {
     AL_CHECK_EQ(detail::read_at<double>(score.data.bytes(), 1), 1.0 / 3.0);
     AL_CHECK(detail::view_as<double>(score.data.bytes().subspan(1)).empty());
 }
+
+AL_TEST(dictionary_field_round_trips_in_memory) {
+    arrowlane::Schema schema;
+    arrowlane::Field field;
+    field.name = "merchant";
+    field.type = arrowlane::Type::utf8();
+    field.dictionary = arrowlane::DictionaryEncoding{7, 4, false};
+    schema.fields.push_back(field);
+
+    arrowlane::ColumnBuilder indices_builder(arrowlane::Type::integer(32, true));
+    indices_builder.append_int(0);
+    indices_builder.append_int(1);
+    indices_builder.append_int(0);
+    arrowlane::ColumnBuilder values_builder(arrowlane::Type::utf8());
+    const std::string v0 = "ozow";
+    const std::string v1 = "payfast";
+    values_builder.append_bytes({reinterpret_cast<const std::byte*>(v0.data()), v0.size()});
+    values_builder.append_bytes({reinterpret_cast<const std::byte*>(v1.data()), v1.size()});
+
+    arrowlane::RecordBatch batch;
+    batch.schema = schema;
+    batch.columns.push_back(indices_builder.finish());
+    batch.dictionaries.push_back(
+        arrowlane::DictionaryColumn{7, arrowlane::Type::utf8(), values_builder.finish()});
+
+    AL_CHECK(arrowlane::validate_batch(batch).has_value());
+    AL_CHECK(batch.schema.fields[0].dictionary.has_value());
+    AL_CHECK_EQ(batch.schema.fields[0].dictionary->id, std::int64_t{7});
+}

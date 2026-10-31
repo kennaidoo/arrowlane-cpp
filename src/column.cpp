@@ -123,6 +123,47 @@ Result<void> validate_batch(const RecordBatch& batch) {
             }
             continue;
         }
+        if (batch.schema.fields[index].dictionary) {
+            const DictionaryEncoding& encoding = *batch.schema.fields[index].dictionary;
+            if (encoding.index_width != 4) {
+                return std::unexpected(make_error(
+                    Code::Invalid, "column " + name + " has a dictionary index width "
+                                       "other than 4"));
+            }
+            if (encoding.ordered) {
+                return std::unexpected(make_error(
+                    Code::Invalid, "column " + name + " is an ordered dictionary"));
+            }
+            if (type.kind != Type::Kind::Utf8 && type.kind != Type::Kind::Binary) {
+                return std::unexpected(make_error(
+                    Code::Unsupported,
+                    "column " + name + " is a dictionary of " + type.name()));
+            }
+            if (!column.offsets.empty()) {
+                return std::unexpected(make_error(
+                    Code::Invalid, "column " + name + " carries offsets for an index column"));
+            }
+            const std::size_t index_bytes =
+                static_cast<std::size_t>(column.length) * encoding.index_width;
+            if (column.data.size() != index_bytes) {
+                return std::unexpected(make_error(
+                    Code::Invalid, "column " + name + " has the wrong index bytes"));
+            }
+            bool found = false;
+            for (const DictionaryColumn& dictionary : batch.dictionaries) {
+                if (dictionary.id != encoding.id) continue;
+                found = true;
+                if (!(dictionary.value_type == type)) {
+                    return std::unexpected(make_error(
+                        Code::Invalid, "column " + name + " has a dictionary of another type"));
+                }
+            }
+            if (!found) {
+                return std::unexpected(make_error(
+                    Code::Invalid, "column " + name + " has no dictionary with that id"));
+            }
+            continue;
+        }
         if (type.is_variable_length()) {
             const std::size_t entries = static_cast<std::size_t>(column.length) + 1;
             const std::size_t width = type.offset_width();
