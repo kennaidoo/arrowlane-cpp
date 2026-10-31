@@ -204,9 +204,23 @@ The same source built with GCC 16 in the container reaches 1.02 ms on this machi
 which is close to the arena number less the smaller allocations it still pays. The
 Linux path therefore already avoids most of this cost.
 
-Nothing was changed on the strength of it. Reusing the payload is a contract change
-and needs its own test cycle. The loss recorded in D5 stands: 0.975 and 0.905 on
-arm64 are both short of 0.90.
+`encode_ipc_into` now takes a caller buffer and was measured the same way, both
+paths alternating inside one process:
+
+| Reading | Value |
+|---|---|
+| `encode_ipc`, payload allocated on every call | 2.29 to 2.57 ms |
+| `encode_ipc_into`, one reused buffer | 0.83 to 0.93 ms |
+| paired ratio | 0.332 to 0.343 |
+
+Three times faster on Windows, and faster than the container build of the same
+source, which takes 1.02 ms. `encode_ipc` and `encode_ipc_into` share one builder:
+the stream is assembled first, so its size is known before anything is written, and
+a caller buffer that is too small is refused without a partial write.
+
+The allocating path stays the default, so nothing that exists today changes. The
+loss recorded in D5 stands: 0.975 and 0.905 on arm64 are both short of 0.90, because
+the comparison runs in containers where the allocation cost is already absent.
 
 ## Measured and reverted
 

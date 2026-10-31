@@ -146,24 +146,40 @@ std::size_t write_record_batch_metadata(detail::FlatWriter& writer,
     return record.pos;
 }
 
-Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch,
-                                          std::size_t headroom) {
+namespace {
+
+// A dictionary batch that is already built: its metadata and the body it describes.
+struct IpcDictionary {
+    std::vector<std::byte> meta;
+    std::vector<std::byte> body;
+};
+
+// The whole stream, built before any output buffer is touched. Knowing the total
+// size up front is what lets a caller hand in a buffer and have it checked before
+// a single byte is written.
+struct IpcStream {
+    std::vector<std::byte> schema_message;
+    std::vector<IpcDictionary> dictionaries;
+    std::vector<std::byte> record_meta;
+    std::size_t record_body_size = 0;
+
+    [[nodiscard]] std::size_t total(std::size_t headroom) const noexcept {
+        std::size_t size = headroom + schema_message.size();
+        for (const IpcDictionary& dictionary : dictionaries) {
+            size += dictionary.meta.size() + dictionary.body.size();
+        }
+        return size + record_meta.size() + record_body_size + kEndOfStream.size();
+    }
+};
+
+Result<IpcStream> build_ipc_stream(const RecordBatch& batch, const IpcLayout& layout) {
+    IpcStream stream;
     auto schema_message = encode_schema_message(batch.schema);
     if (!schema_message) return std::unexpected(schema_message.error());
-    auto layout = plan_ipc_body(batch);
-    if (!layout) return std::unexpected(layout.error());
+    stream.schema_message = std::move(*schema_message);
 
-    // The schema message first, then one dictionary batch per dictionary, then
-    // the record batch. Arrow requires each dictionary before the batch that
-    // indexes it. One buffer holds all of it.
-    std::vector<std::byte> out;
-    if (headroom == 0) {
-        out = std::move(*schema_message);
-    } else {
-        out.assign(headroom, std::byte{0});
-        out.insert(out.end(), schema_message->begin(), schema_message->end());
-    }
-
+    // The schema message first, then one dictionary batch per dictionary, then the
+    // record batch. Arrow requires each dictionary before the batch that indexes it.
     for (const DictionaryColumn& dictionary : batch.dictionaries) {
         // A dictionary batch is a record batch with one column: the values.
         RecordBatch values;
@@ -194,9 +210,9 @@ Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch,
         writer.patch_offset(data_field, data_pos);
         writer.patch_offset(header_field, batch_table.pos);
 
-        auto meta = detail::encapsulate(writer.finish(message.pos));
-        out.insert(out.end(), meta.begin(), meta.end());
-        out.insert(out.end(), values_body->begin(), values_body->end());
+        stream.dictionaries.push_back(
+            IpcDictionary{detail::encapsulate(writer.finish(message.pos)),
+                          std::move(*values_body)});
     }
 
     detail::FlatWriter writer(4096);
@@ -204,25 +220,72 @@ Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch,
     writer.add_i16(message, 0, detail::kMessageVersionV5);
     writer.add_u8(message, 1, detail::kMessageHeaderRecordBatch);
     const std::size_t header_field = writer.add_offset(message, 2);
-    writer.add_i64(message, 3, layout->body_size);
+    writer.add_i64(message, 3, layout.body_size);
     writer.end_table(message);
 
-    const std::size_t record_pos = write_record_batch_metadata(writer, batch, *layout);
+    const std::size_t record_pos = write_record_batch_metadata(writer, batch, layout);
     writer.patch_offset(header_field, record_pos);
+    stream.record_meta = detail::encapsulate(writer.finish(message.pos));
+    stream.record_body_size = static_cast<std::size_t>(layout.body_size);
+    return stream;
+}
 
-    // One allocation for the whole frame. The body is placed into the region it
-    // will occupy in the wire, so nothing is copied twice.
-    auto meta = detail::encapsulate(writer.finish(message.pos));
-    const auto body_size = static_cast<std::size_t>(layout->body_size);
-    const std::size_t body_start = out.size() + meta.size();
-    out.reserve(body_start + body_size + kEndOfStream.size());
-    out.insert(out.end(), meta.begin(), meta.end());
-    out.resize(body_start + body_size);
-    auto placed = place_ipc_body(batch, *layout,
-                                 std::span<std::byte>(out.data() + body_start, body_size));
+// Copies the built pieces into `out` in wire order. The record body is placed
+// directly into the region it will occupy, so nothing is copied twice.
+Result<std::span<std::byte>> write_ipc_stream(const RecordBatch& batch,
+                                             const IpcStream& stream,
+                                             const IpcLayout& layout,
+                                             std::size_t headroom,
+                                             std::span<std::byte> out) {
+    const std::size_t total = stream.total(headroom);
+    if (out.size() < total) {
+        return std::unexpected(make_error(
+            Code::Limit, "the caller buffer is smaller than the encoded stream"));
+    }
+    std::byte* cursor = out.data();
+    std::memset(cursor, 0, headroom);
+    cursor += headroom;
+    std::memcpy(cursor, stream.schema_message.data(), stream.schema_message.size());
+    cursor += stream.schema_message.size();
+    for (const IpcDictionary& dictionary : stream.dictionaries) {
+        std::memcpy(cursor, dictionary.meta.data(), dictionary.meta.size());
+        cursor += dictionary.meta.size();
+        std::memcpy(cursor, dictionary.body.data(), dictionary.body.size());
+        cursor += dictionary.body.size();
+    }
+    std::memcpy(cursor, stream.record_meta.data(), stream.record_meta.size());
+    cursor += stream.record_meta.size();
+    auto placed = place_ipc_body(
+        batch, layout, std::span<std::byte>(cursor, stream.record_body_size));
     if (!placed) return std::unexpected(placed.error());
-    out.insert(out.end(), kEndOfStream.begin(), kEndOfStream.end());
+    cursor += stream.record_body_size;
+    std::memcpy(cursor, kEndOfStream.data(), kEndOfStream.size());
+    return out.first(total);
+}
+
+}  // namespace
+
+Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch, std::size_t headroom) {
+    auto layout = plan_ipc_body(batch);
+    if (!layout) return std::unexpected(layout.error());
+    auto stream = build_ipc_stream(batch, *layout);
+    if (!stream) return std::unexpected(stream.error());
+
+    // One allocation for the whole frame, sized exactly.
+    std::vector<std::byte> out(stream->total(headroom));
+    auto written =
+        write_ipc_stream(batch, *stream, *layout, headroom, std::span<std::byte>(out));
+    if (!written) return std::unexpected(written.error());
     return out;
+}
+
+Result<std::span<std::byte>> encode_ipc_into(const RecordBatch& batch,
+                                            std::span<std::byte> buffer) {
+    auto layout = plan_ipc_body(batch);
+    if (!layout) return std::unexpected(layout.error());
+    auto stream = build_ipc_stream(batch, *layout);
+    if (!stream) return std::unexpected(stream.error());
+    return write_ipc_stream(batch, *stream, *layout, 0, buffer);
 }
 
 // ---------------------------------------------------------------- decoding

@@ -34,6 +34,14 @@ struct IpcLayout {
 [[nodiscard]] Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch,
                                                         std::size_t headroom = 0);
 
+// Writes the stream into `buffer` and returns the part of it that holds the
+// stream. The size is planned before anything is written, so a buffer that is too
+// small is refused without a partial write. A caller that keeps one buffer and
+// reuses it pays no page faults for the payload, which is where more than half of
+// the Windows encode time goes.
+[[nodiscard]] Result<std::span<std::byte>> encode_ipc_into(const RecordBatch& batch,
+                                                           std::span<std::byte> buffer);
+
 [[nodiscard]] Result<RecordBatch> decode_ipc(
     std::span<const std::byte> stream,
     std::size_t max_uncompressed = kMaxUncompressedBytes);
