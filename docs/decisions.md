@@ -15,6 +15,14 @@ a solo three platform matrix, so free public runners are not a reason to
 publish early. The reason to publish is credibility for the benchmark, and that
 only exists once there is a measured release.
 
+Outcome 2026-10-31: every gate item is green. The MSVC gate passes 24 of 24
+binaries, the Wolfi container passes 24 tests plus six interop checks, the three
+lane wire check and the selector parity check pass, history holds no secrets,
+and no tracked file contains a personal path. One benchmark row, ipc encode
+against Rust, is undetermined on this machine; `docs/performance.md` records it
+with three runs and an interval. That is a limit of measurement precision, not a
+code defect, so it does not block publication.
+
 Reverse if the comparison work needs public review before the release.
 
 ## D2 Version numbering: 0.1.0 until a published release
@@ -56,3 +64,26 @@ as the top entry.
 
 Joining the Python repository's Docker benchmark: do it after the 1.0.0 tag,
 because that harness expects a stable CLI and a release binary.
+
+## D4 Binary size: the 512 KB target is withdrawn
+
+The target was written before the zstd lane existed. Measured on 2026-10-31:
+
+| Build | zstd | Bytes |
+|---|---|---|
+| release | linked | 1,122,816 |
+| size optimised | linked | 1,025,536 |
+| release | compiled out | 717,824 |
+| size optimised | compiled out | 644,096 |
+
+The smallest full feature build is 1,025,536 bytes, and even without zstd the
+binary is 644,096, so no configuration reaches 512 KB. Keeping a target that no
+build can meet would make the record dishonest.
+
+Reason: static zstd costs about 400 KB, and the CLI carries describe, select,
+pack, unpack and bench. A smaller artifact would mean a separate library only
+build or a shared zstd, which is a packaging decision rather than an
+optimisation.
+
+Reverse if a shared zstd or a library only build is wanted for a specific
+deployment, in which case the target returns with a stated configuration.

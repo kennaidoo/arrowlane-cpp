@@ -91,16 +91,22 @@ Four wins, one undetermined, no losses.
 
 ## Undetermined: ipc encode
 
-This row is not settled and is not claimed. Two runs measured it two ways:
+This row is not settled and is not claimed. Three runs measured it three ways:
 
-| Run | Repeats | Ratio per round | Median | Verdict |
-|---|---|---|---|---|
-| four way, 09:55 | 7 | 1.136, 0.688, 1.052 | 1.052 | undetermined |
-| focused rerun | 25 | 1.090, 0.835, 0.687 | 0.835 | undetermined |
+| Run | Repeats | Rounds | Median ratio | Range | Verdict |
+|---|---|---|---|---|---|
+| four way, 09:55 | 7 | 3 | 1.052 | 0.688..1.136 | undetermined |
+| focused rerun | 25 | 3 | 0.835 | 0.687..1.090 | undetermined |
+| pinned to two cores | 15 | 9 | 0.835 | 0.403..1.064 | undetermined |
 
-Across six rounds the ratio spans 0.687 to 1.136. In one round C++ takes 31
+Across fifteen rounds the ratio spans 0.403 to 1.136. In one round C++ takes 60
 percent less time than Rust, in another it takes 14 percent more. The threshold
 is 0.90, and the data straddles it.
+
+Pinning the containers to two cores halved the spread, from 0.688..1.136 to
+0.722..0.944 in the first pinned run. In the nine round pinned run, 7 of 9
+rounds are under the threshold, and a 95 percent bootstrap interval for the
+median ratio is 0.812 to 1.038, so the threshold is not excluded.
 
 An earlier run reported this row as a win at 1.306 against 1.883. That reading
 came from comparing two unpaired ranges, which threw away the fact that both
@@ -120,9 +126,9 @@ The json lane, at 250 to 2000 ms, averages the same interruptions out.
 Every missed target, with the number and the open task behind it.
 
 1. **Release binary, 1,122,816 bytes against a 512 KB target.** 2.2 times the
-   target. About 700 KB of it is statically linked zstd. A build with
-   `-DAL_BUILD_ZSTD=OFF` is smaller and cannot read the zstd lane, so the
-   number above is the honest one for the full feature set.
+   target, and the target is withdrawn rather than met: the smallest full
+   feature build is 1,025,536 bytes, and the smallest build at all, with zstd
+   compiled out, is 644,096 bytes. The measurements are in Binary size above.
 2. **Startup time, not measured.** The Rust and Zig images are scratch images
    with no shell, so `--version` cannot be timed inside them. This row is
    unproven, not won.
@@ -156,13 +162,23 @@ is appended into the payload instead of being built as an object first.
 
 ## Binary size
 
-| Artifact | Bytes |
-|---|---|
-| arrowlane-cpp.exe, release, MSVC | 1122816 |
-| arrowlane_capi.dll, release, MSVC | 1000448 |
+| Build | zstd | Bytes |
+|---|---|---|
+| release, MSVC | linked | 1,122,816 |
+| size optimised, MSVC | linked | 1,025,536 |
+| release, MSVC | compiled out | 717,824 |
+| size optimised, MSVC | compiled out | 644,096 |
 
-Single files, no runtime dependency beyond the C++ runtime, zstd linked
-statically.
+Reproduce with `scripts\measure-size.cmd`. `arrowlane_capi.dll` is 1,000,448
+bytes in a release build.
+
+The 512 KB target is not reachable and is withdrawn, see decision D4. zstd
+accounts for 381,440 bytes of the difference, and even with the zstd lane
+compiled out the binary is 644,096 bytes, 1.26 times the target. The shipped
+number for the full feature set is 1,025,536 bytes in a size optimised build,
+or 1,122,816 in the release build that `scripts\build.cmd Release` produces.
+
+Single files, no runtime dependency beyond the C++ runtime.
 
 ## What is not claimed
 

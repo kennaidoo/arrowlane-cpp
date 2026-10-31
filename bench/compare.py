@@ -25,6 +25,7 @@ import argparse
 import datetime
 import json
 import platform
+import random
 import shutil
 import statistics
 import subprocess
@@ -77,6 +78,26 @@ def summarise(samples: list[float]) -> tuple[float, float, float]:
     """Median, low and high of the per round samples."""
     ordered = sorted(samples)
     return statistics.median(ordered), ordered[0], ordered[-1]
+
+
+def bootstrap_median_ci(ratios: list[float], resamples: int = 10_000,
+                        seed: int = 7) -> tuple[float, float]:
+    """95 percent percentile bootstrap interval for the median.
+
+    The per round ratios are right skewed when one round is interrupted, so the
+    median is the statistic to quote, and an interval says how much of it is
+    noise. Pure Python on purpose: the harness has no dependencies.
+    """
+    count = len(ratios)
+    if count < 2:
+        return ratios[0], ratios[0]
+    rng = random.Random(seed)
+    medians = []
+    for _ in range(resamples):
+        pick = [ratios[rng.randrange(count)] for _ in range(count)]
+        medians.append(statistics.median(pick))
+    medians.sort()
+    return medians[int(resamples * 0.025)], medians[int(resamples * 0.975) - 1]
 
 
 def field_samples(samples: Samples, impl: str, lane: str, field: int) -> list[float]:
@@ -194,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         ratios = [cpp / reference_value for cpp, reference_value
                   in zip(cpp_rounds, ref_rounds)]
         ratio_median, ratio_low, ratio_high = summarise(ratios)
+        ci_low, ci_high = bootstrap_median_ci(ratios)
         threshold = condition["ratio"]
         if ratio_high <= threshold:
             verdict = "WIN "
@@ -215,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         line = (
             f"{verdict:<13} {name:<16} "
             f"ratio={ratio_median:.3f} [{ratio_low:.3f}..{ratio_high:.3f}]  "
+            f"ci95=[{ci_low:.3f}..{ci_high:.3f}]  "
             f"threshold={threshold:.2f}  "
             f"cpp={show(cpp_median)} [{show(cpp_low)}..{show(cpp_high)}]  "
             f"{reference}={show(ref_median)} [{show(ref_low)}..{show(ref_high)}]  "
