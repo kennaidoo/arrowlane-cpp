@@ -74,3 +74,20 @@ jobs:
         with:
           name: bench-arm64
           path: bench-arm64.json
+      # D5 asks for a paired ratio on a second architecture, which needs both sides
+      # measured in the same round. The C++ image is built first so the Rust
+      # checkout does not land inside its build context.
+      - name: Build the C++ benchmark image
+        run: docker build -t arrowlane-bench-cpp:local -f bench/Dockerfile.cpp .
+      - name: Check out the Rust reference
+        uses: actions/checkout@v5
+        with:
+          repository: kennaidoo/arrowlane-rust
+          path: arrowlane-rust
+      - name: Build the Rust benchmark image
+        run: docker build -t arrowlane-bench-rust:local -f arrowlane-rust/bench/Dockerfile arrowlane-rust
+      - name: Paired ratio
+        run: >
+          python3 bench/compare.py --impls cpp,rust --rows 200000
+          --repeats 7 --rounds 3 --check
+        continue-on-error: true
