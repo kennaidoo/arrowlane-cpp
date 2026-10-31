@@ -90,3 +90,19 @@ AL_TEST(decimal_bytes_and_limits) {
     AL_CHECK_ERR(arrowlane::detail::decimal128_from_text("1", 39),
                  arrowlane::Code::BadHeader);
 }
+
+// The chunked digit writer must handle a value that fills all 38 digits, which
+// is the only case that reaches the fifth base 10^9 chunk.
+AL_TEST(decimal_text_covers_the_widest_value) {
+    const std::string widest = std::string(38, '9');
+    auto parsed = arrowlane::detail::decimal128_from_text(widest, 0);
+    AL_REQUIRE(parsed.has_value());
+    AL_CHECK_EQ(arrowlane::detail::decimal128_to_text(*parsed, 0), widest);
+
+    // With scale 38 the text is the number itself, so the point has to be in it:
+    // "999...9" would be 10^38-1 scaled up by 10^38 and overflow.
+    const std::string widest_scaled = "0." + widest;
+    auto parsed_scaled = arrowlane::detail::decimal128_from_text(widest_scaled, 38);
+    AL_REQUIRE(parsed_scaled.has_value());
+    AL_CHECK_EQ(arrowlane::detail::decimal128_to_text(*parsed_scaled, 38), widest_scaled);
+}

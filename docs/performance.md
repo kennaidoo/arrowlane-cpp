@@ -141,6 +141,19 @@ golden payload unchanged. The ipc encode row moved from 6.996 ms to between 1.3
 and 1.9 ms after the checksum, the body placement and the in place wire write,
 which turned it from a code question into a measurement question.
 
+## Measured and reverted
+
+An optimisation that does not move its number is recorded here, so the same work
+is not repeated.
+
+1. **Decimal digits in base 10^9.** Dividing the four limb value by 1,000,000,000
+   five times instead of by 10 up to 38 times cuts the divisions from 152 to 20
+   per value. json encode at 200000 rows measured 237.714 ms before and 242.683
+   ms after, medians of three runs of five repeats each, so the change sat inside
+   the run to run spread and was reverted. The decimal formatter is not the json
+   lane's floor. The guard test for the widest value stayed, because it exposed a
+   gap in the test suite: no case covered a value that fills all 38 digits.
+
 ## Allocation budgets
 
 `test/alloc_test.cpp` counts every allocation with a global operator new and
