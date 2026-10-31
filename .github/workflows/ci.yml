@@ -88,10 +88,10 @@ jobs:
           path: arrowlane-rust
       - name: Build the Rust benchmark image
         run: docker build -t arrowlane-bench-rust:local -f arrowlane-rust/bench/Dockerfile arrowlane-rust
-      # --check exits 1 on any condition that is not a win, and ipc encode is a
-      # known loss on this runner (D5). The step is a record, not a gate.
+      # The gate is the baseline: a known loss stays quiet, a row that gets worse
+      # fails the job. --check alone would fail on the known loss for ever, which
+      # is why this step used to carry continue-on-error.
       - name: Paired ratio
         run: >
           python3 bench/compare.py --impls cpp,rust --rows 200000
-          --repeats 7 --rounds 3 --check
-        continue-on-error: true
+          --repeats 7 --rounds 3 --baseline bench/baseline.json

@@ -69,6 +69,33 @@ CONDITIONS = (
      "field": WIRE},
 )
 
+VERDICT_RANK = {"LOSS": 0, "UNDETERMINED": 1, "INFO": 1, "WIN": 2}
+
+
+def verdict_rank(verdict: str) -> int:
+    """Higher is better. An unknown verdict ranks as undetermined, never as a win."""
+    return VERDICT_RANK.get(verdict.strip().upper(), 1)
+
+
+def baseline_regressions(expected: dict[str, str], actual: dict[str, str]) -> list[str]:
+    """Rows that are worse than the baseline, or rows the baseline never saw.
+
+    A row this run could not measure is not a regression: the arm64 job runs two
+    implementations and the baseline covers five conditions.
+    """
+    problems = []
+    for name, want in expected.items():
+        got = actual.get(name)
+        if got is None:
+            continue
+        if verdict_rank(got) < verdict_rank(want):
+            problems.append(f"{name}: baseline {want.strip()}, now {got.strip()}")
+    for name in actual:
+        if name not in expected:
+            problems.append(f"{name}: not in the baseline, record it deliberately")
+    return problems
+
+
 DOCKER = shutil.which("docker")
 
 Samples = dict[str, dict[str, list[tuple[int, float, float]]]]
@@ -168,6 +195,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="exit 1 when a win condition is missed")
     parser.add_argument("--build", action="store_true",
                         help="rebuild the C++ image first")
+    parser.add_argument("--baseline", default="",
+                        help="JSON file of expected verdicts; a worse row fails")
+    parser.add_argument("--update-baseline", default="",
+                        help="write the verdicts of this run to this file")
     args = parser.parse_args(argv)
     if args.rows < 1 or args.repeats < 1 or args.rounds < 1:
         parser.error("rows, repeats and rounds must be positive")
@@ -193,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     lines: list[str] = []
     losses: list[str] = []
     undetermined: list[str] = []
+    verdicts: dict[str, str] = {}
     for condition in CONDITIONS:
         name = condition["name"]
         reference = condition["reference"]
@@ -227,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
             undetermined.append(name)
         if verdict == "LOSS":
             losses.append(name)
+        verdicts[name] = verdict.strip()
 
         def show(number: float) -> str:
             return f"{number:.0f}" if field == WIRE else f"{number:.3f}"
@@ -335,6 +368,24 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8",
     )
     print(f"wrote {RESULTS / (name + '.md')}")
+
+    if args.update_baseline:
+        Path(args.update_baseline).write_text(
+            json.dumps({"conditions": verdicts}, indent=2) + "\n", encoding="utf-8")
+        print(f"wrote {args.update_baseline}")
+
+    if args.baseline:
+        expected = json.loads(
+            Path(args.baseline).read_text(encoding="utf-8"))["conditions"]
+        problems = baseline_regressions(expected, verdicts)
+        if problems:
+            print("\nBaseline regressions:", flush=True)
+            for problem in problems:
+                print(f"  {problem}", flush=True)
+            return 1
+        print(f"\nAll measured rows are at or above the baseline in {args.baseline}.",
+              flush=True)
+        return 0
 
     if args.check and losses:
         print(f"MISSED: {', '.join(losses)}")
