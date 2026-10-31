@@ -19,9 +19,7 @@ int decode_char(char value) noexcept {
 
 }  // namespace
 
-std::string base64_encode(std::span<const std::byte> bytes) {
-    std::string out;
-    out.reserve(((bytes.size() + 2) / 3) * 4);
+void base64_append(std::string& out, std::span<const std::byte> bytes) {
     std::size_t index = 0;
     for (; index + 3 <= bytes.size(); index += 3) {
         const std::uint32_t block = (std::uint32_t(bytes[index]) << 16) |
@@ -47,6 +45,12 @@ std::string base64_encode(std::span<const std::byte> bytes) {
         out.push_back(kAlphabet[(block >> 6) & 63]);
         out.push_back('=');
     }
+}
+
+std::string base64_encode(std::span<const std::byte> bytes) {
+    std::string out;
+    out.reserve(((bytes.size() + 2) / 3) * 4);
+    base64_append(out, bytes);
     return out;
 }
 

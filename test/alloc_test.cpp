@@ -66,14 +66,13 @@ AL_TEST(alloc_json_encode_is_bounded) {
     AL_REQUIRE(encoded.has_value());
     std::printf("BUDGET json_encode allocations=%zu bytes=%zu\n", counter.allocations,
                 counter.bytes);
-    // The plan's target was 5000 allocations for 1000 rows, which needs value
-    // formatters that write into a caller buffer. This rewrite removed the per
-    // row object and the per row serialisation, so the count fell from 309673
-    // to 163731 and the bytes from 12599013 to 5362161, with byte identical
-    // output. The rest is inside encode_value: a JsonValue and a std::string
-    // per value, and decimal formatting above all. The budget pins today's
-    // number so it cannot regress, and the target stays open.
-    AL_CHECK(counter.allocations <= 170000);
+    // Target: 5000 allocations for 1000 rows, that is 5 per row for an eight
+    // column table. It was 309673 before the per row object was removed, then
+    // 163731 after the payload became the buffer. The rest came from
+    // encode_value building a JsonValue and a std::string per value, and from
+    // the date, time, timestamp, decimal and base64 formatters returning a
+    // std::string each. Appending into the payload removed both.
+    AL_CHECK(counter.allocations <= 5000);
 }
 
 AL_TEST(alloc_ipc_encode_is_bounded) {

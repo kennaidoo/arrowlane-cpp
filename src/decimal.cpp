@@ -52,8 +52,8 @@ std::array<std::byte, 16> decimal128_to_bytes(const Decimal128& value) noexcept 
     return out;
 }
 
-std::string decimal128_to_text(std::span<const std::byte, 16> bytes,
-                               std::int32_t scale) {
+void decimal128_append(std::string& out, std::span<const std::byte, 16> bytes,
+                       std::int32_t scale) {
     assert(scale >= 0 && scale <= 38);
     const Decimal128 value = decimal128_from_bytes(bytes);
     const bool negative = value.negative;
@@ -61,7 +61,10 @@ std::string decimal128_to_text(std::span<const std::byte, 16> bytes,
     if (negative) negate(limbs);
     const bool zero = limbs_zero(limbs);
 
-    std::string digits;
+    // Least significant digit first in a stack buffer: 38 digits is the widest
+    // decimal128, so nothing here allocates.
+    char digits[40];
+    std::size_t count = 0;
     while (!limbs_zero(limbs)) {
         std::uint64_t remainder = 0;
         for (int i = 3; i >= 0; --i) {
@@ -70,27 +73,39 @@ std::string decimal128_to_text(std::span<const std::byte, 16> bytes,
             limbs[static_cast<std::size_t>(i)] = static_cast<std::uint32_t>(current / 10);
             remainder = current % 10;
         }
-        digits.push_back(static_cast<char>('0' + remainder));
+        digits[count++] = static_cast<char>('0' + remainder);
     }
-    if (digits.empty()) digits.push_back('0');
-    std::reverse(digits.begin(), digits.end());
+    if (count == 0) digits[count++] = '0';
 
-    std::string out;
     if (negative && !zero) out.push_back('-');
     if (scale == 0) {
-        out += digits;
-        return out;
+        for (std::size_t index = count; index > 0; --index) {
+            out.push_back(digits[index - 1]);
+        }
+        return;
     }
     const auto places = static_cast<std::size_t>(scale);
-    if (digits.size() <= places) {
+    if (count <= places) {
         out += "0.";
-        out.append(places - digits.size(), '0');
-        out += digits;
-    } else {
-        out += digits.substr(0, digits.size() - places);
-        out.push_back('.');
-        out += digits.substr(digits.size() - places);
+        out.append(places - count, '0');
+        for (std::size_t index = count; index > 0; --index) {
+            out.push_back(digits[index - 1]);
+        }
+        return;
     }
+    for (std::size_t index = count; index > places; --index) {
+        out.push_back(digits[index - 1]);
+    }
+    out.push_back('.');
+    for (std::size_t index = places; index > 0; --index) {
+        out.push_back(digits[index - 1]);
+    }
+}
+
+std::string decimal128_to_text(std::span<const std::byte, 16> bytes,
+                               std::int32_t scale) {
+    std::string out;
+    decimal128_append(out, bytes, scale);
     return out;
 }
 

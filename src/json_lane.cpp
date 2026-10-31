@@ -67,27 +67,26 @@ std::int64_t days_from_civil(int year, unsigned month, unsigned day) {
     return era * 146097 + doe - 719468;
 }
 
-std::string date_text(std::int64_t days) {
+void append_date(std::string& out, std::int64_t days) {
     const Civil civil = civil_from_days(days);
-    char buffer[48];
-    std::snprintf(buffer, sizeof(buffer), "%04d-%02u-%02u", civil.year, civil.month,
-                  civil.day);
-    return buffer;
+    char buffer[16];
+    const int written = std::snprintf(buffer, sizeof(buffer), "%04d-%02u-%02u",
+                                      civil.year, civil.month, civil.day);
+    if (written > 0) out.append(buffer, static_cast<std::size_t>(written));
 }
 
-std::string time_text(std::int64_t seconds, std::int64_t micros) {
+void append_time(std::string& out, std::int64_t seconds, std::int64_t micros) {
     const int hour = static_cast<int>(seconds / 3600);
     const int minute = static_cast<int>((seconds / 60) % 60);
     const int second = static_cast<int>(seconds % 60);
     const int fraction = static_cast<int>(micros);
-    char buffer[64];
-    if (fraction == 0) {
-        std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d", hour, minute, second);
-    } else {
-        std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d.%06d", hour, minute, second,
-                      fraction);
-    }
-    return buffer;
+    char buffer[24];
+    const int written =
+        fraction == 0
+            ? std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d", hour, minute, second)
+            : std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d.%06d", hour, minute,
+                            second, fraction);
+    if (written > 0) out.append(buffer, static_cast<std::size_t>(written));
 }
 
 Result<void> split_unit(std::int64_t value, std::uint8_t unit, std::int64_t& seconds,
@@ -115,36 +114,80 @@ Result<void> split_unit(std::int64_t value, std::uint8_t unit, std::int64_t& sec
     return {};
 }
 
-std::string timestamp_text(std::int64_t seconds, std::int64_t micros,
-                           const std::string& timezone) {
+void append_timestamp(std::string& out, std::int64_t seconds, std::int64_t micros,
+                      const std::string& timezone) {
     const std::int64_t days = floor_div(seconds, 86'400);
     const std::int64_t rest = seconds - days * 86'400;
-    std::string out = date_text(days);
+    append_date(out, days);
     out.push_back('T');
-    out += time_text(rest, micros);
-    if (!timezone.empty()) {
-        out += "+00:00";
+    append_time(out, rest, micros);
+    if (!timezone.empty()) out += "+00:00";
+}
+
+std::string_view bytes_as_text(std::span<const std::byte> bytes) {
+    if (bytes.empty()) return {};
+    return std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+// Numbers are written exactly as write_number writes them in src/json.cpp, so
+// the payload bytes do not move.
+void append_int(std::string& out, std::int64_t value) {
+    char buffer[32];
+    const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+    out.append(buffer, result.ptr);
+}
+
+void append_uint(std::string& out, std::uint64_t value) {
+    char buffer[32];
+    const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+    out.append(buffer, result.ptr);
+}
+
+void append_double(std::string& out, double number) {
+    if (std::isnan(number)) {
+        out += "NaN";
+        return;
     }
-    return out;
+    if (std::isinf(number)) {
+        out += number < 0 ? "-Infinity" : "Infinity";
+        return;
+    }
+    char buffer[64];
+    const auto result = std::to_chars(buffer, buffer + sizeof(buffer), number,
+                                      std::chars_format::general);
+    bool marker = false;
+    for (const char* cursor = buffer; cursor != result.ptr; ++cursor) {
+        if (*cursor == '.' || *cursor == 'e' || *cursor == 'E') {
+            marker = true;
+            break;
+        }
+    }
+    out.append(buffer, result.ptr);
+    if (!marker) out += ".0";
 }
 
-JsonValue tagged(const char* tag, std::string text) {
-    JsonValue value = JsonValue::make_object();
-    value.set("$", JsonValue(std::string(tag)));
-    value.set("v", JsonValue(std::move(text)));
-    return value;
+// The tag object prefix: {"$":"tag","v":
+void append_tag(std::string& out, const char* tag) {
+    out += "{\"$\":\"";
+    out += tag;
+    out += "\",\"v\":";
 }
 
-Result<JsonValue> encode_value(const Type& type, const Column& column,
-                               std::int64_t row) {
+// Writes one value straight into the payload. No JsonValue and no std::string
+// per value: the payload is the only buffer.
+Result<void> append_value(std::string& out, const Type& type, const Column& column,
+                          std::int64_t row) {
     const std::size_t index = static_cast<std::size_t>(row);
     const std::size_t width = type.width();
     switch (type.kind) {
-        case Type::Kind::Null: return JsonValue();
+        case Type::Kind::Null:
+            out += "null";
+            return {};
         case Type::Kind::Bool: {
             const std::byte byte = column.data[index / 8];
             const bool set = (byte & (std::byte{1} << (index % 8))) != std::byte{0};
-            return JsonValue(set);
+            out += set ? "true" : "false";
+            return {};
         }
         case Type::Kind::Int: {
             const auto raw = column.data.bytes().subspan(index * width, width);
@@ -156,7 +199,8 @@ Result<JsonValue> encode_value(const Type& type, const Column& column,
                     case 4: value = detail::load_le<std::uint32_t>(raw.data()); break;
                     default: value = detail::load_le<std::uint64_t>(raw.data()); break;
                 }
-                return JsonValue::make_uint(value);
+                append_uint(out, value);
+                return {};
             }
             std::int64_t value = 0;
             switch (width) {
@@ -165,7 +209,8 @@ Result<JsonValue> encode_value(const Type& type, const Column& column,
                 case 4: value = detail::load_le<std::int32_t>(raw.data()); break;
                 default: value = detail::load_le<std::int64_t>(raw.data()); break;
             }
-            return JsonValue(value);
+            append_int(out, value);
+            return {};
         }
         case Type::Kind::Float: {
             double value = 0.0;
@@ -174,31 +219,41 @@ Result<JsonValue> encode_value(const Type& type, const Column& column,
             } else {
                 value = detail::load_le<double>(column.data.bytes().data() + index * 8);
             }
-            if (!std::isfinite(value)) return JsonValue();
-            return JsonValue(value);
+            if (!std::isfinite(value)) {
+                out += "null";
+                return {};
+            }
+            append_double(out, value);
+            return {};
         }
         case Type::Kind::Utf8:
         case Type::Kind::LargeUtf8: {
-            const auto bytes = column.bytes_at(row);
-            std::string text(bytes.size(), '\0');
-            if (!bytes.empty()) {
-                std::memcpy(text.data(), bytes.data(), bytes.size());
-            }
-            return JsonValue(std::move(text));
+            json_append_string(out, bytes_as_text(column.bytes_at(row)));
+            return {};
         }
         case Type::Kind::Binary:
         case Type::Kind::LargeBinary: {
-            const auto bytes = column.bytes_at(row);
-            return tagged("bin", base64_encode(bytes));
+            append_tag(out, "bin");
+            out.push_back('"');
+            base64_append(out, column.bytes_at(row));
+            out += "\"}";
+            return {};
         }
         case Type::Kind::FixedSizeBinary: {
-            const auto bytes = column.data.bytes().subspan(index * width, width);
-            return tagged("bin", base64_encode(bytes));
+            append_tag(out, "bin");
+            out.push_back('"');
+            base64_append(out, column.data.bytes().subspan(index * width, width));
+            out += "\"}";
+            return {};
         }
         case Type::Kind::Decimal: {
             const auto bytes = column.data.bytes().subspan(index * width, width);
             const std::span<const std::byte, 16> fixed(bytes.data(), 16);
-            return tagged("dec", detail::decimal128_to_text(fixed, type.scale));
+            append_tag(out, "dec");
+            out.push_back('"');
+            detail::decimal128_append(out, fixed, type.scale);
+            out += "\"}";
+            return {};
         }
         case Type::Kind::Date: {
             std::int64_t days = 0;
@@ -209,7 +264,11 @@ Result<JsonValue> encode_value(const Type& type, const Column& column,
                     detail::load_le<std::int64_t>(column.data.bytes().data() + index * 8),
                     86'400'000);
             }
-            return tagged("date", date_text(days));
+            append_tag(out, "date");
+            out.push_back('"');
+            append_date(out, days);
+            out += "\"}";
+            return {};
         }
         case Type::Kind::Time: {
             const std::int64_t raw =
@@ -220,7 +279,11 @@ Result<JsonValue> encode_value(const Type& type, const Column& column,
             std::int64_t micros = 0;
             auto split = split_unit(raw, type.unit, seconds, micros);
             if (!split) return std::unexpected(split.error());
-            return tagged("time", time_text(seconds, micros));
+            append_tag(out, "time");
+            out.push_back('"');
+            append_time(out, seconds, micros);
+            out += "\"}";
+            return {};
         }
         case Type::Kind::Timestamp: {
             if (!type.timezone.empty() && type.timezone != "UTC") {
@@ -234,7 +297,11 @@ Result<JsonValue> encode_value(const Type& type, const Column& column,
             std::int64_t micros = 0;
             auto split = split_unit(raw, type.unit, seconds, micros);
             if (!split) return std::unexpected(split.error());
-            return tagged("ts", timestamp_text(seconds, micros, type.timezone));
+            append_tag(out, "ts");
+            out.push_back('"');
+            append_timestamp(out, seconds, micros, type.timezone);
+            out += "\"}";
+            return {};
         }
         case Type::Kind::Duration: {
             const std::int64_t raw =
@@ -246,10 +313,10 @@ Result<JsonValue> encode_value(const Type& type, const Column& column,
                 case 2: divisor = 1'000'000.0; break;
                 default: divisor = 1'000'000'000.0; break;
             }
-            JsonValue value = JsonValue::make_object();
-            value.set("$", JsonValue(std::string("dur")));
-            value.set("v", JsonValue(static_cast<double>(raw) / divisor));
-            return value;
+            append_tag(out, "dur");
+            append_double(out, static_cast<double>(raw) / divisor);
+            out.push_back('}');
+            return {};
         }
     }
     return std::unexpected(make_error(Code::Unsupported, "unknown type"));
@@ -279,9 +346,8 @@ Result<std::string> encode_json_payload(const RecordBatch& batch) {
                 payload.append("null");
                 continue;
             }
-            auto value = encode_value(field.type, column, row);
-            if (!value) return std::unexpected(value.error());
-            json_append_value(payload, *value);
+            auto appended = append_value(payload, field.type, column, row);
+            if (!appended) return std::unexpected(appended.error());
         }
         payload.push_back('}');
         if (row + 1 < batch.rows()) payload.push_back('\n');

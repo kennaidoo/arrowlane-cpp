@@ -20,6 +20,10 @@ struct Decimal128 {
     std::span<const std::byte, 16> bytes) noexcept;
 [[nodiscard]] std::array<std::byte, 16> decimal128_to_bytes(
     const Decimal128& value) noexcept;
+// Appends the decimal text to out. No allocation of its own beyond out's growth.
+void decimal128_append(std::string& out, std::span<const std::byte, 16> bytes,
+                       std::int32_t scale);
+
 [[nodiscard]] std::string decimal128_to_text(std::span<const std::byte, 16> bytes,
                                              std::int32_t scale);
 [[nodiscard]] Result<std::array<std::byte, 16>> decimal128_from_text(
