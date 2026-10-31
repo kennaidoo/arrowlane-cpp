@@ -18,10 +18,13 @@
 #include <cstddef>
 #include <cstdint>
 
+#if defined(__x86_64__) || defined(_M_X64)
+// cpuid.h is an x86 header. Including it on aarch64 fails to compile.
 #if defined(_MSC_VER)
 #include <intrin.h>
 #else
 #include <cpuid.h>
+#endif
 #endif
 
 #if defined(__x86_64__) || defined(_M_X64)
