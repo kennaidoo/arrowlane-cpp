@@ -218,9 +218,24 @@ source, which takes 1.02 ms. `encode_ipc` and `encode_ipc_into` share one builde
 the stream is assembled first, so its size is known before anything is written, and
 a caller buffer that is too small is refused without a partial write.
 
-The allocating path stays the default, so nothing that exists today changes. The
-loss recorded in D5 stands: 0.975 and 0.905 on arm64 are both short of 0.90, because
-the comparison runs in containers where the allocation cost is already absent.
+The allocating path stays the default, so nothing that exists today changes.
+
+Decomposed with a three row fixture, which isolates the metadata from the body:
+
+| Fixture | Reuse path |
+|---|---|
+| 3 rows, 1224 bytes, metadata and no real body | 0.005 to 0.010 ms |
+| 200000 rows, 12670072 bytes | 0.67 to 0.68 ms |
+| a warm copy of 12670072 bytes | 0.50 to 0.54 ms |
+
+The metadata is free at this size, and the encode costs 1.3 times the copy it has to
+make. A contiguous payload cannot be produced for less than one copy, so there is no
+second factor of two here. The remaining 0.15 ms is the per column assembly around
+the copies: eight columns, their validity bitmaps and their offsets.
+
+The loss recorded in D5 stands: 0.975 and 0.905 on arm64 are both short of 0.90,
+because the comparison runs in containers where the allocation cost is already
+absent.
 
 ## Measured and reverted
 
