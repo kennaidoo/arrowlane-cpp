@@ -10,8 +10,9 @@ party code is zstd, fetched by script for the `ipc-zstd` lane.
 
 ## Status
 
-Version 1.0.0. The wire format and the public API are frozen; 2.0.0 is the next
-breaking change.
+Version 0.1.0. Nothing is published yet, so the version says so. The wire format
+is frozen at format version 1 and is checked against pyarrow on every run; the
+package version stays below 1.0.0 until there is a published release.
 
 What works today:
 

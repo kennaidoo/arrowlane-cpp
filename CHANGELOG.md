@@ -3,9 +3,9 @@
 One entry per release. The wire format version is separate from the package
 version and has not changed.
 
-## 1.0.0
+## 0.1.0
 
-First correct release. Frame format version 1.
+First release, not yet published. Frame format version 1.
 
 - Frame encode and decode with CRC32, stream readers and writers, and bounded
   limits on every length that arrives from the wire.

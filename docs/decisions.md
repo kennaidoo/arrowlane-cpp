@@ -17,17 +17,24 @@ only exists once there is a measured release.
 
 Reverse if the comparison work needs public review before the release.
 
-## D2 Version numbering: 0.1.0 now, 1.0.0 at the release
+## D2 Version numbering: 0.1.0 until a published release
 
-Stay on 0.1.0 through Phases 5 to 8. Tag 1.0.0 at the Phase 9 release.
+Decision on 2026-10-31: stay on 0.1.0. The earlier plan was to tag 1.0.0 at the
+Phase 9 gate, and that was done, then reversed: nothing has been published, and a
+1.0.0 tag on an unreleased repository is a claim with nothing behind it.
 
-Reason: a 0.x number says the wire format and the public API may still move.
-Frame format v1 is already frozen, so 1.0.0 is the promise that it stays
-frozen. Do not adopt the Python package's 0.3.1 line: this is a new codebase.
-The documentation states the relationship instead, "reads and writes arrowlane
-frame v1 and interoperates with arrowlane 0.3.1".
+Reason: a 0.x number says the wire format and the public API may still move. The
+wire format itself is frozen at format version 1 and is checked against pyarrow
+on every run, which is a separate promise from the package version. Do not adopt
+the Python package's 0.3.1 line: this is a new codebase. The documentation states
+the relationship instead, "reads and writes arrowlane frame v1 and interoperates
+with arrowlane 0.3.1".
 
-Reverse if the wire format has to change before Phase 9, in which case the
+Reverse when the repository is published and the first release is cut. Then the
+package version becomes 1.0.0 and the tag follows the published artifact, not the
+gate.
+
+Historical note: the wire format has to change before Phase 9, in which case the
 release stays 0.x.
 
 ## D3 PCLMULQDQ CRC32: out of scope unless measured above the trigger
