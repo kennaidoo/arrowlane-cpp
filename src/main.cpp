@@ -192,7 +192,7 @@ int pack_command(const char* lane_text, std::int64_t rows, const char* out_path,
     }
     auto frame = arrowlane::encode_lane(*lane, batch);
     if (!frame) return fail(frame.error());
-    auto wire = arrowlane::encode_frame(*frame);
+    auto wire = arrowlane::encode_frame(std::move(*frame));
     if (!wire) return fail(wire.error());
     std::ofstream stream(out_path, std::ios::binary);
     if (!stream) {
@@ -524,7 +524,7 @@ int bench_command(std::int64_t rows, int repeats, bool as_json, bool machine) {
             const auto start = std::chrono::steady_clock::now();
             auto encoded = arrowlane::encode_lane(*id, batch);
             if (!encoded) return fail(encoded.error());
-            auto bytes = arrowlane::encode_frame(*encoded);
+            auto bytes = arrowlane::encode_frame(std::move(*encoded));
             if (!bytes) return fail(bytes.error());
             const auto encoded_at = std::chrono::steady_clock::now();
             auto decoded_frame = arrowlane::decode_frame(

@@ -1,7 +1,9 @@
 #include "harness.hpp"
 
 #include "arrowlane/crc32.hpp"
+#include "arrowlane/fixture.hpp"
 #include "arrowlane/frame.hpp"
+#include "arrowlane/lanes.hpp"
 #include "arrowlane/json.hpp"
 #include "detail/bytes.hpp"
 
@@ -157,4 +159,25 @@ AL_TEST(chunk_metadata_rejects_a_missing_key) {
     value.set("id", arrowlane::JsonValue(std::string("0123456789abcdef0123456789abcdef")));
     value.set("index", arrowlane::JsonValue(std::int64_t{0}));
     AL_CHECK_ERR(arrowlane::parse_chunk(value), arrowlane::Code::Chunk);
+}
+
+// The lane reserves the prefix and header space, so encode_frame must fill that
+// space and hand back the same buffer. A copy would show up as a different
+// address.
+AL_TEST(encode_frame_writes_in_place_when_headroom_matches) {
+    const auto batch = arrowlane::make_fixture(64);
+    auto frame = arrowlane::encode_lane(arrowlane::LaneId::Ipc, batch);
+    AL_REQUIRE(frame.has_value());
+    AL_CHECK(frame->headroom > 0);
+    const std::byte* address = frame->payload.data();
+    const std::size_t total = frame->payload.size();
+    auto wire = arrowlane::encode_frame(std::move(*frame));
+    AL_REQUIRE(wire.has_value());
+    AL_CHECK(wire->data() == address);
+    AL_CHECK_EQ(wire->size(), total);
+    auto decoded =
+        arrowlane::decode_frame(std::span<const std::byte>(wire->data(), wire->size()));
+    AL_REQUIRE(decoded.has_value());
+    AL_CHECK_EQ(decoded->rows, std::uint64_t{64});
+    AL_CHECK(decoded->uncompressed_len > 0);
 }

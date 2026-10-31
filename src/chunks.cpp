@@ -215,12 +215,12 @@ bool ChunkProducer::next(std::vector<std::byte>& out) {
             failure_message_ = frame.error().message;
             return false;
         }
-        if (frame->payload.size() > max_payload_) {
+        if (frame->body().size() > max_payload_) {
             if (end - start <= 1) {
                 failed_ = true;
                 failure_code_ = Code::OversizeFrame;
                 failure_message_ = "one row encodes to " +
-                                   std::to_string(frame->payload.size()) + " bytes, over " +
+                                   std::to_string(frame->body().size()) + " bytes, over " +
                                    std::to_string(max_payload_);
                 return false;
             }

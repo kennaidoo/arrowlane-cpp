@@ -108,7 +108,8 @@ Result<std::vector<std::byte>> build_ipc_body(const RecordBatch& batch,
     return body;
 }
 
-Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch) {
+Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch,
+                                          std::size_t headroom) {
     auto schema_message = encode_schema_message(batch.schema);
     if (!schema_message) return std::unexpected(schema_message.error());
     auto layout = plan_ipc_body(batch);
@@ -152,7 +153,13 @@ Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch) {
 
     // One allocation for the whole frame. The body is placed into the region
     // it will occupy in the wire, so nothing is copied twice.
-    std::vector<std::byte> out = std::move(*schema_message);
+    std::vector<std::byte> out;
+    if (headroom == 0) {
+        out = std::move(*schema_message);
+    } else {
+        out.assign(headroom, std::byte{0});
+        out.insert(out.end(), schema_message->begin(), schema_message->end());
+    }
     auto meta = detail::encapsulate(writer.finish(message.pos));
     const auto body_size = static_cast<std::size_t>(layout->body_size);
     const std::size_t body_start = out.size() + meta.size();

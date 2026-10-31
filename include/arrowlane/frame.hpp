@@ -40,11 +40,24 @@ struct ChunkInfo {
 
 struct Frame {
     LaneId lane = LaneId::Json;
+    // Bytes reserved at the front of `payload` for the prefix and the header.
+    // A lane that fills this in lets encode_frame write in place instead of
+    // copying the payload into a second buffer.
+    std::size_t headroom = 0;
     std::vector<std::byte> payload;
     std::uint64_t rows = 0;
     std::uint64_t uncompressed_len = 0;
     std::uint16_t flags = 0;
     JsonValue header;
+
+    // The payload bytes, without the reserved headroom. A frame that came
+    // straight from encode_lane has headroom; a frame decoded from the wire
+    // has none.
+    [[nodiscard]] std::span<const std::byte> body() const noexcept {
+        const auto bytes = std::span<const std::byte>(payload);
+        if (headroom > bytes.size()) return {};
+        return bytes.subspan(headroom);
+    }
 
     [[nodiscard]] std::optional<ChunkInfo> chunk() const;
 };
@@ -62,6 +75,11 @@ struct FrameView {
 
 [[nodiscard]] Result<std::vector<std::byte>> encode_frame(
     const Frame& frame, std::size_t max_payload = kMaxPayloadBytes);
+
+// Consumes the frame. When the lane reserved exactly the prefix and header
+// space, the wire is built in the frame's own buffer and nothing is copied.
+[[nodiscard]] Result<std::vector<std::byte>> encode_frame(
+    Frame&& frame, std::size_t max_payload = kMaxPayloadBytes);
 
 [[nodiscard]] Result<Frame> decode_frame(
     std::span<const std::byte> data, std::size_t max_payload = kMaxPayloadBytes,

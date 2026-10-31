@@ -22,6 +22,19 @@ Result<Frame> encode_lane(LaneId lane, const RecordBatch& batch,
 
 Result<RecordBatch> decode_lane(const Frame& frame, const LaneOptions& options,
                                 std::size_t max_uncompressed) {
+    if (frame.headroom != 0) {
+        // A frame that came from encode_lane still holds the space reserved for
+        // the prefix and the header. Hand the decoders a frame without it, so
+        // no decoder needs to know about headroom.
+        Frame body;
+        body.lane = frame.lane;
+        body.flags = frame.flags;
+        body.rows = frame.rows;
+        body.uncompressed_len = frame.uncompressed_len;
+        body.header = frame.header;
+        body.payload.assign(frame.body().begin(), frame.body().end());
+        return decode_lane(body, options, max_uncompressed);
+    }
     switch (frame.lane) {
         case LaneId::Json: return detail::decode_json_lane(frame, max_uncompressed);
         case LaneId::Ipc: return detail::decode_ipc_lane(frame, max_uncompressed);

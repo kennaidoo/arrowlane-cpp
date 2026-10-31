@@ -180,10 +180,16 @@ Result<FrameParts> encode_parts(const Frame& frame, std::size_t max_payload) {
             "max_payload " + std::to_string(max_payload) + " exceeds " +
                 std::to_string(kMaxPayloadBytes)));
     }
-    if (frame.payload.size() > max_payload) {
+    if (frame.headroom > frame.payload.size()) {
+        return std::unexpected(
+            make_error(Code::Invalid, "frame headroom exceeds its payload"));
+    }
+    const std::span<const std::byte> body =
+        std::span<const std::byte>(frame.payload).subspan(frame.headroom);
+    if (body.size() > max_payload) {
         return std::unexpected(make_error(
             Code::OversizeFrame,
-            "payload " + std::to_string(frame.payload.size()) + " exceeds " +
+            "payload " + std::to_string(body.size()) + " exceeds " +
                 std::to_string(max_payload)));
     }
     if (!frame.header.is_object()) {
@@ -201,21 +207,41 @@ Result<FrameParts> encode_parts(const Frame& frame, std::size_t max_payload) {
             "header " + std::to_string(parts.header.size()) + " exceeds " +
                 std::to_string(kMaxHeaderBytes)));
     }
-    const std::uint32_t checksum = crc32(frame.payload);
+    const std::uint32_t checksum = crc32(body);
     std::byte* prefix = parts.prefix.data();
     std::memcpy(prefix, "ALN1", 4);
     prefix[4] = static_cast<std::byte>(kFormatVersion);
     prefix[5] = static_cast<std::byte>(frame.lane);
     detail::store_le<std::uint16_t>(prefix + 6, frame.flags);
     detail::store_le<std::uint64_t>(prefix + 8,
-                                    static_cast<std::uint64_t>(frame.payload.size()));
+                                    static_cast<std::uint64_t>(body.size()));
     detail::store_le<std::uint64_t>(prefix + 16, frame.uncompressed_len);
     detail::store_le<std::uint64_t>(prefix + 24, frame.rows);
     detail::store_le<std::uint32_t>(prefix + 32, checksum);
     detail::store_le<std::uint16_t>(prefix + 36,
                                     static_cast<std::uint16_t>(parts.header.size()));
-    parts.payload = frame.payload;
+    parts.payload = body;
     return parts;
+}
+
+Result<std::vector<std::byte>> encode_frame(Frame&& frame, std::size_t max_payload) {
+    auto parts = encode_parts(frame, max_payload);
+    if (!parts) return std::unexpected(parts.error());
+    const std::size_t header_size = parts->header.size();
+    if (frame.headroom == kPrefixSize + header_size && frame.headroom > 0) {
+        std::memcpy(frame.payload.data(), parts->prefix.data(), kPrefixSize);
+        std::memcpy(frame.payload.data() + kPrefixSize, parts->header.data(),
+                    header_size);
+        return std::move(frame.payload);
+    }
+    std::vector<std::byte> out(kPrefixSize + header_size + parts->payload.size());
+    std::memcpy(out.data(), parts->prefix.data(), kPrefixSize);
+    std::memcpy(out.data() + kPrefixSize, parts->header.data(), header_size);
+    if (!parts->payload.empty()) {
+        std::memcpy(out.data() + kPrefixSize + header_size, parts->payload.data(),
+                    parts->payload.size());
+    }
+    return out;
 }
 
 Result<std::vector<std::byte>> encode_frame(const Frame& frame, std::size_t max_payload) {

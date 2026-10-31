@@ -47,17 +47,22 @@ Result<void> detail::check_frame_schema(const JsonValue& header,
 Result<Frame> detail::encode_ipc_lane(const RecordBatch& batch) {
     auto valid = validate_batch(batch);
     if (!valid) return std::unexpected(valid.error());
-    auto raw = encode_ipc(batch);
-    if (!raw) return std::unexpected(raw.error());
     auto header = detail::lane_header(batch.schema,
                                       "application/vnd.apache.arrow.stream");
     if (!header) return std::unexpected(header.error());
+    // Reserve the prefix and the header in front of the stream, so encode_frame
+    // can write the wire in this buffer instead of copying the payload.
+    const auto header_text = json_write_sorted(*header);
+    const std::size_t headroom = kPrefixSize + header_text.size();
+    auto raw = encode_ipc(batch, headroom);
+    if (!raw) return std::unexpected(raw.error());
 
     Frame frame;
     frame.lane = LaneId::Ipc;
+    frame.headroom = headroom;
     frame.payload = std::move(*raw);
     frame.rows = static_cast<std::uint64_t>(batch.rows());
-    frame.uncompressed_len = frame.payload.size();
+    frame.uncompressed_len = frame.payload.size() - headroom;
     frame.flags = 0;
     frame.header = std::move(*header);
     return frame;

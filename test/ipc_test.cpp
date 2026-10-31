@@ -177,7 +177,7 @@ AL_TEST(ipc_lane_roundtrip) {
     auto frame = encode_lane(LaneId::Ipc, batch);
     AL_REQUIRE(frame.has_value());
     AL_CHECK(frame->lane == LaneId::Ipc);
-    AL_CHECK_EQ(frame->uncompressed_len, frame->payload.size());
+    AL_CHECK_EQ(frame->uncompressed_len, frame->body().size());
     auto decoded = decode_lane(*frame);
     AL_REQUIRE(decoded.has_value());
     check_matches_fixture(*decoded, batch);

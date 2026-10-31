@@ -29,7 +29,10 @@ struct IpcLayout {
 [[nodiscard]] Result<std::vector<std::byte>> build_ipc_body(const RecordBatch& batch,
                                                             const IpcLayout& layout);
 
-[[nodiscard]] Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch);
+// `headroom` bytes are left zeroed at the front of the result, so a lane can
+// hand the buffer to encode_frame without another copy.
+[[nodiscard]] Result<std::vector<std::byte>> encode_ipc(const RecordBatch& batch,
+                                                        std::size_t headroom = 0);
 
 [[nodiscard]] Result<RecordBatch> decode_ipc(
     std::span<const std::byte> stream,
