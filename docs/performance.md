@@ -180,6 +180,27 @@ or 1,122,816 in the release build that `scripts\build.cmd Release` produces.
 
 Single files, no runtime dependency beyond the C++ runtime.
 
+## arm64
+
+No arm64 host is attached to this desk, so this section records the state and not
+a number.
+
+Proven:
+
+- The library builds for aarch64 with GCC 16 under
+  `docker run --platform linux/arm64`, once `<cpuid.h>` is guarded out of the two
+  x86 checksum files.
+- `crc32_test` prints `crc32 kernels: pclmul=0 vpclmul=0` and
+  `ok 5 tests, 13 checks` there, so the ARMv8 path equals the table path on 2000
+  buffers of 1 to 70000 bytes.
+- The `linux-arm64` job in `.github/workflows/ci.yml` builds and tests on
+  `ubuntu-24.04-arm`.
+
+Not measured: ipc encode time on arm64. Without the hardware checksum the frame
+costs 6 to 8 ms of checksum at 200000 rows; with it the expected band is 3 to 5
+ms. That is an expectation, not a result, and it stays out of the win table until
+a named arm64 host produces the median.
+
 ## What is not claimed
 
 Nothing here says this is the fastest implementation overall. It is fastest on

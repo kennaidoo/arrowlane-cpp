@@ -28,4 +28,11 @@ namespace arrowlane {
 // system has enabled the YMM state.
 [[nodiscard]] bool crc32_have_vpclmul() noexcept;
 
+// ARMv8 CRC32 instruction path. Returns exactly what crc32_table returns, on any
+// CPU: when the instructions or the length are missing it calls crc32_table.
+[[nodiscard]] std::uint32_t crc32_arm(std::span<const std::byte> bytes) noexcept;
+
+// True on aarch64 when the CRC32 instructions are available at compile time.
+[[nodiscard]] bool crc32_have_arm_crc32() noexcept;
+
 }  // namespace arrowlane
