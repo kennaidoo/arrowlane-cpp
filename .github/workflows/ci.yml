@@ -44,6 +44,22 @@ jobs:
         run: cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      # The strongest interop claim in this repo, on every push instead of only on
+      # the desk. It installs the Python reference and compares one table encoded by
+      # both implementations: the json payload to the byte, and every ipc data
+      # buffer to the byte.
+      - name: Check out the Python reference
+        uses: actions/checkout@v5
+        with:
+          repository: kennaidoo/arrowlane
+          path: arrowlane-py
+      - name: Install the reference package
+        run: python3 -m pip install --quiet -e arrowlane-py
+      - name: Byte identity
+        run: >
+          ARROWLANE_SRC=$PWD/arrowlane-py/src
+          ARROWLANE_BENCH=$PWD/arrowlane-py/bench/containers
+          python3 interop/check_bytes.py --exe ./build/arrowlane-cpp --rows 200000
 
   linux-arm64:
     runs-on: ubuntu-24.04-arm
