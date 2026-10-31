@@ -127,6 +127,11 @@ if(AL_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.cpp")
     target_compile_definitions(${test_name} PRIVATE
       AL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures")
     add_test(NAME ${test_name} COMMAND ${test_name})
+    # Every test runs in the build directory, so a test that writes a file
+    # (dictionary_test writes the interop fixture) never touches the source
+    # mount, which is read only in the container.
+    set_tests_properties(${test_name} PROPERTIES
+                         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
   endforeach()
   add_executable(cabi_test test/cabi_test.cpp src/cabi.cpp)
   target_link_libraries(cabi_test PRIVATE al_test_main)

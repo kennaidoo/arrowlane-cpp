@@ -66,8 +66,9 @@ ARROWLANE_SRC=/arrowlane/src "${PYTHON:-python3}" /src/interop/check_chunks.py  
 
 echo "== check_dictionary =="
 # Two directions: the C++ test writes a dictionary stream for pyarrow to read,
-# and it reads the stream pyarrow wrote.
-"${PYTHON:-python3}" /src/interop/make_dict_fixture.py
+# and it reads the stream pyarrow wrote. The pyarrow fixture is committed, so the
+# generator is not run here: the source mount is read only, and regenerating it
+# is a maintainer step (interop/make_dict_fixture.py).
 "$BUILD/dictionary_test"
 "${PYTHON:-python3}" /src/interop/check_dictionary.py --path "$BUILD/dict_cpp.arrows"
 
