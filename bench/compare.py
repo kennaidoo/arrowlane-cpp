@@ -110,9 +110,15 @@ def parse(text: str) -> dict[str, tuple[int, float, float]]:
     return found
 
 
-def measure(impl: str, rows: int, repeats: int) -> dict[str, tuple[int, float, float]]:
-    argv = [DOCKER, "run", "--rm", IMAGES[impl], *PREFIX[impl],
-            "--rows", str(rows), "--repeats", str(repeats)]
+def measure(impl: str, rows: int, repeats: int,
+            cpuset: str = "") -> dict[str, tuple[int, float, float]]:
+    argv = [DOCKER, "run", "--rm"]
+    if cpuset:
+        # Pinning removes the scheduler's choice of core, which is the largest
+        # source of run to run noise on a shared desktop.
+        argv += ["--cpuset-cpus", cpuset]
+    argv += [IMAGES[impl], *PREFIX[impl], "--rows", str(rows), "--repeats",
+             str(repeats)]
     return parse(run(argv))
 
 
@@ -135,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="interleaved rounds; each round measures every impl")
     parser.add_argument("--impls", default=",".join(IMPLS),
                         help="comma separated subset, for a focused rerun of one row")
+    parser.add_argument("--cpuset", default="",
+                        help="pin the containers to these cpus, for example 6,7")
     parser.add_argument("--check", action="store_true",
                         help="exit 1 when a win condition is missed")
     parser.add_argument("--build", action="store_true",
@@ -156,8 +164,8 @@ def main(argv: list[str] | None = None) -> int:
     for round_index in range(args.rounds):
         for impl in chosen:
             print(f"round {round_index + 1}/{args.rounds}: {impl}", flush=True)
-            measure(impl, args.rows, 1)  # warmup, discarded
-            round_result = measure(impl, args.rows, args.repeats)
+            measure(impl, args.rows, 1, args.cpuset)  # warmup, discarded
+            round_result = measure(impl, args.rows, args.repeats, args.cpuset)
             for lane in LANES:
                 samples[impl][lane].append(round_result[lane])
 
