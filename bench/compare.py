@@ -285,8 +285,16 @@ def main(argv: list[str] | None = None) -> int:
     report.append("")
 
     RESULTS.mkdir(parents=True, exist_ok=True)
-    (RESULTS / "latest.md").write_text("\n".join(report), encoding="utf-8")
-    (RESULTS / "latest.json").write_text(
+    # Only a full record run may replace the record. A smoke run writes its own
+    # file, because overwriting latest.md with 2000 row numbers destroys the
+    # evidence the document cites.
+    record = args.rounds >= 3 and args.rows >= 100_000 and chosen == list(IMPLS)
+    if record:
+        name = "latest"
+    else:
+        name = "scratch-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    (RESULTS / f"{name}.md").write_text("\n".join(report), encoding="utf-8")
+    (RESULTS / f"{name}.json").write_text(
         json.dumps(
             {impl: {lane: [list(sample) for sample in samples[impl][lane]]
                     for lane in LANES}
@@ -295,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         encoding="utf-8",
     )
-    print(f"wrote {RESULTS / 'latest.md'}")
+    print(f"wrote {RESULTS / (name + '.md')}")
 
     if args.check and losses:
         print(f"MISSED: {', '.join(losses)}")

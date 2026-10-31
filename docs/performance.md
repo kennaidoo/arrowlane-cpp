@@ -39,7 +39,8 @@ All four are in process timings, so no container start is included.
 
 ## 200000 rows
 
-Run of 2026-10-31 10:52, samples in `bench/results/latest.json`.
+Run of 2026-10-31 10:52, recorded in `bench/results/latest.md`. Only a full
+record run writes that file; a smaller run writes `scratch-<stamp>.md` instead.
 
 ### ipc lane
 

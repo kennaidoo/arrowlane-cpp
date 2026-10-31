@@ -2,3 +2,5 @@
 latest.json
 fixture-*.aln
 *.log
+scratch-*.md
+scratch-*.json
