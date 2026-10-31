@@ -212,10 +212,30 @@ Proven:
 - The `linux-arm64` job in `.github/workflows/ci.yml` builds and tests on
   `ubuntu-24.04-arm`.
 
-Not measured: ipc encode time on arm64. Without the hardware checksum the frame
-costs 6 to 8 ms of checksum at 200000 rows; with it the expected band is 3 to 5
-ms. That is an expectation, not a result, and it stays out of the win table until
-a named arm64 host produces the median.
+Measured 2026-10-31 on `ubuntu-24.04-arm`, a GitHub-hosted arm64 runner, at
+commit `83bb8fd`, 200,000 rows and 5 repeats, from the `bench-arm64` artifact of
+run 41200919226:
+
+| Lane | Wire bytes | Encode ms | Decode ms |
+|---|---|---|---|
+| json | 42505784 | 206.18 | 455.41 |
+| ipc | 12670881 | 2.0056 | 1.9699 |
+| ipc-zstd | 1608747 | 30.14 | 7.58 |
+
+Peak RSS was 305300 KB for the process.
+
+Two things this settles:
+
+- **The wire is architecture independent.** All three byte counts are identical to
+  the x86 run, to the byte.
+- **The ARMv8 checksum runs on real hardware.** ipc encode is 2.0056 ms, against
+  1.185 to 1.306 ms on the Ryzen 7 5800X3D. The table fallback was estimated at 6
+  to 8 ms, so this is the instruction path, not the fallback.
+
+This is one run on shared hardware, so it is a first number and not a verdict. It
+does give D5 the second architecture it asked for, though the ipc encode ratio
+there has not been measured against the Rust reference on the same runner, so the
+undetermined row stays undetermined.
 
 ## What is not claimed
 
