@@ -109,3 +109,47 @@ takes the target attribute instead. The CPU reports `vpclmulqdq` with no
    comment, and has a test that fails if the feature is absent.
 3. A feature that is absent gets a portable fallback, not `#error`.
 4. No experimental type crosses a public header. Wrap it in `src/detail/`.
+
+## Instruction level inspection, 2026-10-31
+
+Disassembled with `dumpbin /disasm` on the Release objects and on the linked
+executable, and with `objdump -d` on an aarch64 object built by the same command
+the arm64 CI job uses.
+
+### x86-64
+
+| Unit | Contents | First instruction |
+|---|---|---|
+| `crc32_vpclmul.cpp` object | 26 `vpclmulqdq`, 27 `vpxor`, 1 `vzeroupper` | `C4 E3 55 44 C4 00  vpclmulqdq ymm0,ymm5,ymm4,0` |
+| `crc32_pclmul.cpp` object | 24 `pclmulqdq`, **0** `vpclmulqdq` | `66 0F 3A 44 CA 00  pclmulqdq xmm1,xmm2,0` |
+| linked `arrowlane-cpp.exe` | 22 `vpclmulqdq`, 17 `pclmulqdq`, 34 `vzeroupper` | |
+
+Readings:
+
+- `C4` is the three byte VEX prefix, `E3` sets the 0F3A opcode map and W=0, `55`
+  encodes 256 bit vectors with `ymm5` as the second source, `44` is the PCLMULQDQ
+  opcode, `C4` is the ModRM byte and the trailing `00` selects the low 64 bit
+  halves. The `11h` form selects the high halves.
+- The baseline unit contains no VEX prefix at all, so the file split does what it
+  claims: that object is safe on a CPU without AVX2.
+- The 256 byte threshold is visible in the kernel itself: `49 81 F9 00 01 00`
+  (`cmp r9,100h`) followed by `72 50` (`jb`).
+- The guard is the correct AVX2 sequence: `B8 07 00 00 00` (`mov eax,7`),
+  `0F A2` (`cpuid`), `F6 C3 20` (`test bl,20h`, the AVX2 bit), `0F 01 D0`
+  (`xgetbv`).
+- The object holds 26 `vpclmulqdq` across `crc32_wide_sse` (22) and the two fold
+  helpers (2 each); the linked executable holds 22, the difference being link time
+  optimisation. The functional proof stays the test suite, which compares the wide
+  kernel against the table on 2000 buffers.
+
+### arm64
+
+```
+9ac14c00  crc32x  w0, w0, x1
+1ac14000  crc32b  w0, w0, w1
+```
+
+ACLE exposes `__crc32d` as CRC32X, so the eight byte loop is the hardware
+instruction and the tail loop is CRC32B. Without `-march=armv8-a+crc` GCC refuses
+to inline either and the file does not compile, which is what the first arm64 CI
+run reported.
